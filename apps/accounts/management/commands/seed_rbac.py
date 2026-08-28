@@ -15,6 +15,10 @@ PERMISSIONS = [
     ("patient.manage", "patients", "Создание/редактирование пациентов"),
     ("appointment.view", "scheduling", "Просмотр приёмов"),
     ("appointment.manage", "scheduling", "Создание/редактирование приёмов"),
+    ("visit.view", "visits", "Просмотр приёмов (клинических записей)"),
+    ("visit.manage", "visits", "Создание/редактирование приёмов (клинических записей)"),
+    ("referrals.view", "referrals", "Просмотр направлений"),
+    ("referrals.manage", "referrals", "Создание/обработка направлений (schedule/decline/reassign)"),
 ]
 
 # codename -> (name, is_system, branch-agnostic description, permission codes)
@@ -35,6 +39,10 @@ ROLES = {
             "patient.manage",
             "appointment.view",
             "appointment.manage",
+            "visit.view",
+            "visit.manage",
+            "referrals.view",
+            "referrals.manage",
         ],
     },
     "doctor": {
@@ -46,6 +54,10 @@ ROLES = {
             "patient.view",
             "appointment.view",
             "appointment.manage",
+            "visit.view",
+            "visit.manage",
+            "referrals.view",
+            "referrals.manage",
         ],
     },
     "receptionist": {
@@ -57,6 +69,10 @@ ROLES = {
             "patient.manage",
             "appointment.view",
             "appointment.manage",
+            # Видит очередь направлений на ресепшене, но не создаёт/не обрабатывает
+            # (schedule/decline/reassign — решение врача или координатора филиала)
+            # и не пишет клинические заметки (visit.* нет намеренно).
+            "referrals.view",
         ],
     },
 }
