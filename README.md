@@ -9,11 +9,16 @@
 готово, дизайн в [`docs/PHASE1-DESIGN.md`](docs/PHASE1-DESIGN.md).
 
 **Текущая фаза: Фаза 2 — Клинический контур** (единая ЭМК + модуль
-направлений + базовая диагностика). Срез 1 (модели/миграции) и срез 2
-(API направлений: actions, RBAC, уведомления, `available-slots`) готовы —
-дизайн в [`docs/PHASE2-REFERRALS-DESIGN.md`](docs/PHASE2-REFERRALS-DESIGN.md),
+направлений + базовая диагностика). Бэкенд (модели, API, RBAC, уведомления,
+`available-slots`) готов и задеплоен — дизайн в
+[`docs/PHASE2-REFERRALS-DESIGN.md`](docs/PHASE2-REFERRALS-DESIGN.md),
 спецификация направлений — [`docs/ClinicNet-Referrals-Prompt.md`](docs/ClinicNet-Referrals-Prompt.md).
-Осталось: (c) базовая диагностика, frontend.
+Frontend направлений — в работе, план в
+[`docs/ClinicNet-Phase2-Frontend-Prompt.md`](docs/ClinicNet-Phase2-Frontend-Prompt.md)
+(`ReferralModal.vue` для сценария "внутри одного филиала" готов — см.
+[`frontend/README.md`](frontend/README.md)). Осталось: кросс-филиальный
+сценарий модалки, `ReferralQueueWidget.vue`, `ReferralBadge.vue`, базовая
+диагностика.
 
 ## Стек
 
@@ -21,6 +26,8 @@
 * django-tenants (мультитенантность через отдельную Postgres-схему на сеть клиник)
 * djangorestframework-simplejwt (JWT-аутентификация)
 * PostgreSQL 14+
+* Frontend: Vue 3 + Vite + Pinia + Tailwind (SPA, отдельно от бэкенда — см.
+  [`frontend/README.md`](frontend/README.md))
 
 ## Локальный запуск
 
@@ -61,6 +68,7 @@ apps/
   referrals/       # Referral — направления между врачами + API/actions (Фаза 2)
   notifications/   # Notification — внутренний инбокс (без WA/Telegram-провода)
 docs/              # мастер-план по фазам + дизайн-документы фаз
+frontend/          # Vue 3 SPA — см. frontend/README.md
 ```
 
 ## Тесты
