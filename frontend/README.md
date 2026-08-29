@@ -78,8 +78,11 @@ in the DB.
   building this: `branch.view` alone only ever showed a doctor their own
   branch) → optional specific doctor, falling back to `to_specialty` when
   none is picked.
-* ⬜ `ReferralQueueWidget.vue` (spec step 7). Per the spec's own explicit
-  note: **must re-check `branch_scope`/`branches` from `/me/` client-side
-  before rendering a row** — never assume the backend's queryset filtering
-  is the only line of defense against showing another branch's queue.
+* ✅ `ReferralQueueWidget.vue` (spec step 7) — reusable table (branch or
+  network dashboard), schedule/decline/complete actions. Implements the
+  spec's explicit requirement: every row is re-checked client-side against
+  `auth.referralBranches` (from `/me/`, independent of whatever
+  `GET /referrals/` returned) plus the "own" bypass, before rendering —
+  verified with a Playwright-mocked backend response injecting an
+  out-of-scope row, confirmed dropped + logged, not silently rendered.
 * ⬜ `ReferralBadge.vue` (spec step 8).
