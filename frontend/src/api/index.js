@@ -37,6 +37,7 @@ export const appointmentsApi = {
   // Used by ReferralQueueWidget's "Забронировать" action: books the actual
   // calendar slot, then referralsApi.schedule() links it to the referral.
   create: (data) => client.post('appointments/', data),
+  list: (params) => client.get('appointments/', { params }),
 }
 
 export const specialtiesApi = {

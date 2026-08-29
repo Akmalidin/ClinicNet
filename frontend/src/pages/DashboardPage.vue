@@ -37,6 +37,7 @@ onMounted(async () => {
     <header class="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
       <h1 class="text-lg font-semibold text-gray-900">ClinicNet</h1>
       <div class="flex items-center gap-4 text-sm text-gray-600">
+        <RouterLink :to="{ name: 'schedule' }" class="text-primary hover:underline">Расписание</RouterLink>
         <span>{{ auth.user?.first_name || auth.user?.username }}</span>
         <button class="btn-secondary" @click="logout">Выйти</button>
       </div>

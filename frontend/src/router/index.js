@@ -17,6 +17,12 @@ const routes = [
     props: true,
     meta: { requiresAuth: true },
   },
+  {
+    path: '/schedule',
+    name: 'schedule',
+    component: () => import('../pages/SchedulePage.vue'),
+    meta: { requiresAuth: true },
+  },
 ]
 
 const router = createRouter({
