@@ -58,18 +58,26 @@ npm run dev       # http://127.0.0.1:5173 — /api/* proxied to :8000, see vite.
 npm run build      # production bundle -> dist/
 ```
 
-Verified end-to-end against a real tenant (Postgres schema, JWT login,
-DRF `available_slots`/`referrals` endpoints) via a scripted Playwright run:
-login → patient card → `ReferralModal` → doctor + slots → submit → PENDING
-`Referral` created with `diagnosis_snapshot` correctly derived server-side
-from the source visit.
+Verified end-to-end against real tenants (Postgres schema, JWT login, DRF
+`available_slots`/`referrals`/`branches/directory` endpoints) via scripted
+Playwright runs: login → patient card → `ReferralModal` → doctor + slots →
+submit → PENDING `Referral` created with `diagnosis_snapshot` correctly
+derived server-side from the source visit (same-branch scenario); and,
+against a two-branch tenant, the cross-branch scenario both with a specific
+doctor picked and with none (`to_specialty` only) — both confirmed correct
+in the DB.
 
 ## Referral status (this slice)
 
 * ✅ `ReferralModal.vue` — same-branch scenario (spec step 5): pick a
   doctor in the visit's branch, see their free slots for the next 3 days,
   fill reason/clinical note (prefilled from the visit) + priority, submit.
-* ⬜ Cross-branch extension (specialty → branch → doctor) — spec step 6.
+* ✅ Cross-branch extension (spec step 6): a mode toggle adds
+  specialty → branch (via `branchesApi.directory()` — see
+  `apps/branches/views.py` `BranchDirectoryView`, a gap found while
+  building this: `branch.view` alone only ever showed a doctor their own
+  branch) → optional specific doctor, falling back to `to_specialty` when
+  none is picked.
 * ⬜ `ReferralQueueWidget.vue` (spec step 7). Per the spec's own explicit
   note: **must re-check `branch_scope`/`branches` from `/me/` client-side
   before rendering a row** — never assume the backend's queryset filtering
