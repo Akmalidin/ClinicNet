@@ -85,4 +85,14 @@ in the DB.
   `GET /referrals/` returned) plus the "own" bypass, before rendering —
   verified with a Playwright-mocked backend response injecting an
   out-of-scope row, confirmed dropped + logged, not silently rendered.
-* ⬜ `ReferralBadge.vue` (spec step 8).
+* ✅ `ReferralBadge.vue` (spec step 8) — icon + hover tooltip (reason +
+  referring doctor) on an appointment row created from a referral,
+  reading the new `referral` field on `AppointmentSerializer`. Given a
+  home on a new, deliberately minimal `SchedulePage.vue` (`/schedule`) —
+  a flat sorted table, not the calendar-grid schedule view the master
+  plan eventually wants — since nothing in the frontend showed
+  appointments at all yet. Verified: badge shown only on the referred
+  appointment, absent on a walk-in in the same list, correct tooltip text.
+
+All four referral frontend steps from the spec (5-8) are done. Next up:
+basic diagnostics (lab order + manual result entry) — not started.
