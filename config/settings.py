@@ -143,4 +143,57 @@ REST_FRAMEWORK = {
     "DEFAULT_FILTER_BACKENDS": (
         "django_filters.rest_framework.DjangoFilterBackend",
     ),
+    "EXCEPTION_HANDLER": "config.exception_handlers.logging_exception_handler",
+}
+
+# ---------------------------------------------------------------------------
+# No third-party account (Sentry etc.) is wired in yet — this is the part of
+# "monitoring" that works with nothing but the server we already have:
+# structured console logging, captured by gunicorn's --access-logfile -
+# --error-logfile - and readable via `journalctl -u clinicnet`. In
+# particular `clinicnet.security` (see config/exception_handlers.py) makes
+# 401/403 responses visible, which DRF does not log on its own — without
+# this, a wrong branch_scope or a missing RBAC grant fails silently from an
+# ops point of view even though the user sees a clean 403.
+# ---------------------------------------------------------------------------
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "verbose": {
+            "format": "%(asctime)s %(levelname)s %(name)s: %(message)s",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "verbose",
+        },
+    },
+    "root": {
+        "handlers": ["console"],
+        "level": "INFO",
+    },
+    "loggers": {
+        "django": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        "django.request": {
+            "handlers": ["console"],
+            "level": "WARNING",
+            "propagate": False,
+        },
+        "django.security": {
+            "handlers": ["console"],
+            "level": "WARNING",
+            "propagate": False,
+        },
+        "clinicnet.security": {
+            "handlers": ["console"],
+            "level": "WARNING",
+            "propagate": False,
+        },
+    },
 }
