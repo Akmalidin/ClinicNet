@@ -3,6 +3,7 @@ import { onMounted, ref } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 
 import { branchesApi, patientsApi } from '../api'
+import ReferralQueueWidget from '../components/referrals/ReferralQueueWidget.vue'
 import { useAuthStore } from '../stores/auth'
 
 const auth = useAuthStore()
@@ -64,6 +65,14 @@ onMounted(async () => {
             </RouterLink>
           </li>
         </ul>
+      </section>
+
+      <section>
+        <h2 class="text-sm font-medium text-gray-500 mb-2">Очередь направлений (сеть)</h2>
+        <!-- No `branch` prop -> network-wide, per whatever this user's
+             referral_branches (+ "own") actually cover. Same widget on a
+             branch dashboard would pass :branch="currentBranchId". -->
+        <ReferralQueueWidget />
       </section>
     </main>
   </div>
