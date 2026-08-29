@@ -4,10 +4,13 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Permission, Role, UserRole
+from .models import Permission, Role, Specialty, User, UserRole
+from .rbac import branches_for_permission
 from .serializers import (
+    DoctorSerializer,
     PermissionSerializer,
     RoleSerializer,
+    SpecialtySerializer,
     UserRoleSerializer,
     UserSerializer,
 )
@@ -29,6 +32,18 @@ class MeView(APIView):
             }
             for ur in user.user_roles.filter(is_active=True).select_related("role")
         ]
+        # Precomputed via the same rbac.branches_for_permission() the
+        # backend itself uses to filter — not something the frontend
+        # reconstructs from the raw `roles` above (own_branch scope, in
+        # particular, depends on StaffBranchAssignment, which isn't in
+        # `roles` at all). This is what ReferralQueueWidget.vue's
+        # client-side re-check verifies each row against: an independent
+        # fetch, not a trust of whatever ReferralViewSet.get_queryset
+        # already returned — see its own docstring.
+        data["referral_branches"] = sorted(
+            set(branches_for_permission(user, "referrals.view").values_list("id", flat=True))
+            | set(branches_for_permission(user, "referrals.manage").values_list("id", flat=True))
+        )
         return Response(data)
 
 
@@ -51,3 +66,51 @@ class UserRoleViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(granted_by=self.request.user)
+
+
+class SpecialtyViewSet(viewsets.ReadOnlyModelViewSet):
+    """Catalog of medical specialties — feeds the referral frontend's
+    "направить на специальность" picker (ClinicNet-Referrals-Prompt.md,
+    section 6, cross-branch flow: specialty -> branch -> doctor)."""
+
+    queryset = Specialty.objects.all()
+    serializer_class = SpecialtySerializer
+    permission_classes = [IsAuthenticated]
+
+
+class DoctorViewSet(viewsets.ReadOnlyModelViewSet):
+    """Doctors available as a referral target. Not a general staff
+    directory — scoped to users holding the 'doctor' role, since a
+    referral is always routed to a doctor, never an admin/receptionist.
+
+    ?branch=<id>   only doctors with an active StaffBranchAssignment there
+    ?specialty=<code>  only doctors with that specialty
+    Both are used together for the cross-branch flow (specialty picked
+    first, then branch); ?branch= alone covers the same-branch flow
+    (ReferralModal step 5), where the branch is already known from context.
+    """
+
+    serializer_class = DoctorSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        qs = (
+            User.objects.filter(
+                user_roles__role__codename="doctor",
+                user_roles__is_active=True,
+                is_active=True,
+            )
+            .distinct()
+            .prefetch_related("specialties")
+            .order_by("first_name", "last_name")
+        )
+        branch_id = self.request.query_params.get("branch")
+        if branch_id:
+            qs = qs.filter(
+                branch_assignments__branch_id=branch_id,
+                branch_assignments__is_active=True,
+            ).distinct()
+        specialty = self.request.query_params.get("specialty")
+        if specialty:
+            qs = qs.filter(specialties__code=specialty).distinct()
+        return qs

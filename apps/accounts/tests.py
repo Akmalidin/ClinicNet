@@ -5,7 +5,7 @@ from rest_framework.test import APIClient
 
 from apps.branches.models import Branch, StaffBranchAssignment, Weekday
 
-from .models import BranchScope, Permission, Role, RolePermission, User, UserRole
+from .models import BranchScope, Permission, Role, RolePermission, Specialty, User, UserRole
 from .rbac import branches_for_permission, has_any_permission, has_permission, users_with_permission
 
 
@@ -133,6 +133,158 @@ class BranchScopedAPITests(TenantTestCase):
     def test_branch_list_explicit_filter_out_of_scope_is_forbidden(self):
         response = self._get(f"/api/v1/branch-assignments/?branch={self.branch_b.pk}")
         self.assertEqual(response.status_code, 403)
+
+    def test_branch_directory_is_not_scoped_by_branch_view(self):
+        """Regression test: found while wiring up the cross-branch referral
+        picker — BranchViewSet (above) correctly hides branch_b from a
+        doctor with only own_branch access to branch_a, but the directory
+        endpoint (specialty -> BRANCH -> doctor) has to show every branch
+        in the network regardless, or a cross-branch referral could never
+        be routed anywhere but the referrer's own branch."""
+        response = self._get("/api/v1/branches/directory/")
+        self.assertEqual(response.status_code, 200)
+        codes = {row["code"] for row in response.json()}
+        self.assertEqual(codes, {"a", "b"})
+        # Minimal projection — no address/phone/status leaking to every
+        # authenticated user just to populate a picker.
+        self.assertEqual(set(response.json()[0].keys()), {"id", "name", "code"})
+
+
+class DoctorSpecialtyAPITests(TenantTestCase):
+    """The referral frontend's doctor/specialty pickers — feeds
+    ReferralModal.vue's "выбор врача" (same-branch) and "специальность ->
+    филиал -> врач" (cross-branch) steps, see docs/ClinicNet-Referrals-Prompt.md
+    section 6."""
+
+    def setUp(self):
+        self.branch_a = Branch.objects.create(name="Филиал А", code="a")
+        self.branch_b = Branch.objects.create(name="Филиал Б", code="b")
+        self.ortho = Specialty.objects.create(name="Ортодонтия", code="ortho")
+        self.surgery = Specialty.objects.create(name="Хирургия", code="surgery")
+
+        doctor_role = Role.objects.create(name="Врач", codename="doctor")
+        admin_role = Role.objects.create(name="Администратор", codename="branch-admin")
+
+        self.dr_a = User.objects.create(username="dr_a", first_name="Аида", last_name="А.")
+        self.dr_a.specialties.add(self.ortho)
+        UserRole.objects.create(user=self.dr_a, role=doctor_role, branch_scope=BranchScope.OWN_BRANCH)
+        StaffBranchAssignment.objects.create(
+            staff=self.dr_a, branch=self.branch_a, weekday=Weekday.MONDAY,
+            start_time=time(9, 0), end_time=time(17, 0),
+        )
+
+        self.dr_b = User.objects.create(username="dr_b", first_name="Бек", last_name="Б.")
+        self.dr_b.specialties.add(self.surgery)
+        UserRole.objects.create(user=self.dr_b, role=doctor_role, branch_scope=BranchScope.OWN_BRANCH)
+        StaffBranchAssignment.objects.create(
+            staff=self.dr_b, branch=self.branch_b, weekday=Weekday.MONDAY,
+            start_time=time(9, 0), end_time=time(17, 0),
+        )
+
+        # Not a doctor — must never show up in the referral doctor picker,
+        # even though they're an authenticated staff member with a role.
+        self.receptionist = User.objects.create(username="reception")
+        UserRole.objects.create(user=self.receptionist, role=admin_role, branch_scope=BranchScope.OWN_BRANCH)
+
+        self.client_api = APIClient()
+        self.client_api.force_authenticate(user=self.dr_a)
+        self.tenant_host = self.domain.domain
+
+    def _get(self, path):
+        return self.client_api.get(path, HTTP_HOST=self.tenant_host)
+
+    def test_specialties_list(self):
+        response = self._get("/api/v1/specialties/")
+        self.assertEqual(response.status_code, 200)
+        codes = {row["code"] for row in response.json()}
+        self.assertEqual(codes, {"ortho", "surgery"})
+
+    def test_doctor_list_excludes_non_doctors(self):
+        response = self._get("/api/v1/doctors/")
+        self.assertEqual(response.status_code, 200)
+        ids = {row["id"] for row in response.json()}
+        self.assertEqual(ids, {self.dr_a.pk, self.dr_b.pk})
+
+    def test_doctor_list_filtered_by_branch(self):
+        response = self._get(f"/api/v1/doctors/?branch={self.branch_a.pk}")
+        self.assertEqual(response.status_code, 200)
+        ids = {row["id"] for row in response.json()}
+        self.assertEqual(ids, {self.dr_a.pk})
+
+    def test_doctor_list_filtered_by_specialty(self):
+        response = self._get(f"/api/v1/doctors/?specialty={self.surgery.code}")
+        self.assertEqual(response.status_code, 200)
+        ids = {row["id"] for row in response.json()}
+        self.assertEqual(ids, {self.dr_b.pk})
+
+
+class MeReferralBranchesTests(TenantTestCase):
+    """MeView's referral_branches — what ReferralQueueWidget.vue's
+    client-side branch-scope re-check verifies each row against (its own
+    docstring: never trust that the backend's queryset already filtered
+    correctly, silently)."""
+
+    def setUp(self):
+        self.branch_a = Branch.objects.create(name="Филиал А", code="a")
+        self.branch_b = Branch.objects.create(name="Филиал Б", code="b")
+
+        view_perm = Permission.objects.create(code="referrals.view", category="referrals")
+        manage_perm = Permission.objects.create(code="referrals.manage", category="referrals")
+
+        plain_doctor_role = Role.objects.create(name="Врач", codename="doctor")
+        # No referrals.view/manage — matches the real seed_rbac (see
+        # apps/referrals/permissions.py's docstring): "own" is unconditional,
+        # not scope-gated, so a plain doctor should see [] here.
+
+        coordinator_role = Role.objects.create(name="Координатор филиала", codename="branch-admin")
+        RolePermission.objects.create(role=coordinator_role, permission=view_perm)
+        RolePermission.objects.create(role=coordinator_role, permission=manage_perm)
+
+        network_admin_role = Role.objects.create(name="Администратор сети", codename="network-admin")
+        RolePermission.objects.create(role=network_admin_role, permission=view_perm)
+
+        self.plain_doctor = User.objects.create(username="plain_doc")
+        UserRole.objects.create(user=self.plain_doctor, role=plain_doctor_role, branch_scope=BranchScope.OWN_BRANCH)
+        StaffBranchAssignment.objects.create(
+            staff=self.plain_doctor, branch=self.branch_a, weekday=Weekday.MONDAY,
+            start_time=time(9, 0), end_time=time(17, 0),
+        )
+
+        self.coordinator = User.objects.create(username="coordinator")
+        UserRole.objects.create(
+            user=self.coordinator, role=coordinator_role, branch_scope=BranchScope.OWN_BRANCH
+        )
+        StaffBranchAssignment.objects.create(
+            staff=self.coordinator, branch=self.branch_a, weekday=Weekday.MONDAY,
+            start_time=time(9, 0), end_time=time(17, 0),
+        )
+
+        self.network_admin = User.objects.create(username="net_admin")
+        UserRole.objects.create(user=self.network_admin, role=network_admin_role, branch_scope=BranchScope.ALL)
+
+        self.tenant_host = self.domain.domain
+
+    def _me(self, user):
+        client = APIClient()
+        client.force_authenticate(user=user)
+        return client.get("/api/v1/me/", HTTP_HOST=self.tenant_host)
+
+    def test_plain_doctor_has_no_referral_branches(self):
+        response = self._me(self.plain_doctor)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["referral_branches"], [])
+
+    def test_coordinator_sees_only_their_own_branch(self):
+        response = self._me(self.coordinator)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["referral_branches"], [self.branch_a.pk])
+
+    def test_network_admin_sees_every_branch(self):
+        response = self._me(self.network_admin)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            set(response.json()["referral_branches"]), {self.branch_a.pk, self.branch_b.pk}
+        )
 
 
 class UsersWithPermissionTests(TenantTestCase):

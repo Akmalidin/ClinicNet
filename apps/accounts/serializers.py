@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import Permission, Role, User, UserRole
+from .models import Permission, Role, Specialty, User, UserRole
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -8,6 +8,25 @@ class UserSerializer(serializers.ModelSerializer):
         model = User
         fields = ("id", "username", "first_name", "last_name", "phone", "job_title", "is_active")
         read_only_fields = ("id",)
+
+
+class SpecialtySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Specialty
+        fields = ("id", "name", "code")
+
+
+class DoctorSerializer(serializers.ModelSerializer):
+    """Slim, read-only projection of User for the referral doctor picker —
+    deliberately not the full UserSerializer (no phone, is_active is
+    implicit in being listed at all)."""
+
+    specialties = SpecialtySerializer(many=True, read_only=True)
+    display_name = serializers.CharField(source="__str__", read_only=True)
+
+    class Meta:
+        model = User
+        fields = ("id", "display_name", "first_name", "last_name", "job_title", "specialties")
 
 
 class PermissionSerializer(serializers.ModelSerializer):
