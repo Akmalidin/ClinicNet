@@ -31,5 +31,5 @@ class AppointmentViewSet(viewsets.ModelViewSet):
         allowed_branches = branches_for_permission(self.request.user, code)
         return (
             Appointment.objects.filter(branch__in=allowed_branches)
-            .select_related("branch", "patient", "doctor")
+            .select_related("branch", "patient", "doctor", "referral", "referral__from_doctor")
         )
