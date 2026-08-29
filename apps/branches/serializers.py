@@ -10,6 +10,15 @@ class BranchSerializer(serializers.ModelSerializer):
         read_only_fields = ("id", "created_at")
 
 
+class BranchDirectorySerializer(serializers.ModelSerializer):
+    """Deliberately minimal — no address/phone/timezone — see
+    BranchDirectoryView's docstring for why this exists at all."""
+
+    class Meta:
+        model = Branch
+        fields = ("id", "name", "code")
+
+
 class StaffBranchAssignmentSerializer(serializers.ModelSerializer):
     staff_display = serializers.CharField(source="staff.__str__", read_only=True)
     branch_display = serializers.CharField(source="branch.name", read_only=True)

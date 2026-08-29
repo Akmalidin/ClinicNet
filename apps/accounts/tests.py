@@ -134,6 +134,21 @@ class BranchScopedAPITests(TenantTestCase):
         response = self._get(f"/api/v1/branch-assignments/?branch={self.branch_b.pk}")
         self.assertEqual(response.status_code, 403)
 
+    def test_branch_directory_is_not_scoped_by_branch_view(self):
+        """Regression test: found while wiring up the cross-branch referral
+        picker — BranchViewSet (above) correctly hides branch_b from a
+        doctor with only own_branch access to branch_a, but the directory
+        endpoint (specialty -> BRANCH -> doctor) has to show every branch
+        in the network regardless, or a cross-branch referral could never
+        be routed anywhere but the referrer's own branch."""
+        response = self._get("/api/v1/branches/directory/")
+        self.assertEqual(response.status_code, 200)
+        codes = {row["code"] for row in response.json()}
+        self.assertEqual(codes, {"a", "b"})
+        # Minimal projection — no address/phone/status leaking to every
+        # authenticated user just to populate a picker.
+        self.assertEqual(set(response.json()[0].keys()), {"id", "name", "code"})
+
 
 class DoctorSpecialtyAPITests(TenantTestCase):
     """The referral frontend's doctor/specialty pickers — feeds
