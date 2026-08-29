@@ -2,6 +2,24 @@ from django.contrib.auth.models import AbstractUser
 from django.db import models
 
 
+class Specialty(models.Model):
+    """Medical specialty catalog (Phase 2: needed to route a Referral to
+    "whoever does orthodontics" without the referring doctor having to
+    pick a specific colleague — see apps.referrals.models.Referral.to_specialty
+    and User.specialties below).
+    """
+
+    name = models.CharField(max_length=120, unique=True)
+    code = models.SlugField(max_length=120, unique=True)
+
+    class Meta:
+        verbose_name_plural = "specialties"
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+
 class User(AbstractUser):
     """Staff member within a clinic network (tenant-scoped).
 
@@ -14,6 +32,13 @@ class User(AbstractUser):
         max_length=120,
         blank=True,
         help_text="Например: врач-стоматолог, администратор, кассир.",
+    )
+    specialties = models.ManyToManyField(
+        Specialty,
+        blank=True,
+        related_name="doctors",
+        help_text="Специальности врача — по ним подбираются кандидаты для направления "
+        "'на специальность' (Referral.to_specialty), без выбора конкретного коллеги.",
     )
 
     def __str__(self):

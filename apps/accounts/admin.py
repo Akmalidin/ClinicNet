@@ -1,15 +1,23 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 
-from .models import Permission, Role, RolePermission, User, UserRole
+from .models import Permission, Role, RolePermission, Specialty, User, UserRole
 
 
 @admin.register(User)
 class UserAdmin(DjangoUserAdmin):
     fieldsets = DjangoUserAdmin.fieldsets + (
-        ("ODONTIS", {"fields": ("phone", "job_title")}),
+        ("ClinicNet", {"fields": ("phone", "job_title", "specialties")}),
     )
+    filter_horizontal = DjangoUserAdmin.filter_horizontal + ("specialties",)
     list_display = ("username", "get_full_name", "job_title", "is_active", "is_staff")
+    search_fields = DjangoUserAdmin.search_fields + ("phone",)
+
+
+@admin.register(Specialty)
+class SpecialtyAdmin(admin.ModelAdmin):
+    list_display = ("name", "code")
+    search_fields = ("name", "code")
 
 
 class RolePermissionInline(admin.TabularInline):

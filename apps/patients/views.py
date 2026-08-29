@@ -1,18 +1,25 @@
-from django.db.models import Q
 from rest_framework import viewsets
 
 from apps.accounts.permissions import HasPermission
-from apps.accounts.rbac import branches_for_permission
 
 from .models import Patient
 from .serializers import PatientSerializer
 
 
 class PatientViewSet(viewsets.ModelViewSet):
-    """Network-wide patient list, filtered to the branches the user can see.
+    """Network-wide patient list — the unified EMK (Phase 2).
 
-    A patient with no `primary_branch` (not yet tied to one) is visible to
-    anyone with the base permission, since it isn't scoped to any branch yet.
+    Phase 1 filtered this list by `primary_branch`, which meant the patient
+    CARD itself disappeared (404 on retrieve, absent from list) for staff
+    outside that branch — found during Phase 2 recon as exactly the "карта
+    = один филиал" bug the master plan calls out. Fixed: holding
+    `patient.view`/`patient.manage` in ANY scope (even own_branch) opens
+    the whole network's patient list — a doctor must see a patient's full
+    history regardless of which branch they registered at. `primary_branch`
+    stays available as an explicit, opt-in filter (`?primary_branch=`, see
+    `filterset_fields`), it just no longer silently restricts visibility.
+    Branch-scoping still applies, as it should, to what happens *inside*
+    the card — Visit/Appointment/Referral querysets filter by branch.
     """
 
     serializer_class = PatientSerializer
@@ -28,8 +35,4 @@ class PatientViewSet(viewsets.ModelViewSet):
     search_fields = ["first_name", "last_name", "phone"]
 
     def get_queryset(self):
-        code = self.required_permission.get(self.request.method, "patient.view")
-        allowed_branches = branches_for_permission(self.request.user, code)
-        return Patient.objects.filter(
-            Q(primary_branch__in=allowed_branches) | Q(primary_branch__isnull=True)
-        )
+        return Patient.objects.all()

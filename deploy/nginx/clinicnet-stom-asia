@@ -1,0 +1,41 @@
+server {
+    server_name clinicnet.stom.asia;
+
+    client_max_body_size 25M;
+    access_log /var/log/nginx/clinicnet-stom-asia-access.log;
+    error_log  /var/log/nginx/clinicnet-stom-asia-error.log;
+
+    location /static/ {
+        alias /var/www/clinicnet/staticfiles/;
+        expires 30d;
+        access_log off;
+    }
+    location / {
+        proxy_pass http://127.0.0.1:8041;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_redirect off;
+        proxy_read_timeout 120s;
+    }
+
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    # Точное совпадение server_name (clinicnet.stom.asia) приоритетнее
+    # wildcard-блока *.stom.asia в sites-available/stom-asia — этот блок
+    # и обслужит запрос, sadaf/stom-asia не тронуты. Тот же wildcard-
+    # сертификат stom.asia покрывает *.stom.asia — новый не нужен.
+    ssl_certificate /etc/letsencrypt/live/stom.asia/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/stom.asia/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+}
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name clinicnet.stom.asia;
+    return 301 https://clinicnet.stom.asia$request_uri;
+}

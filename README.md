@@ -1,13 +1,19 @@
-# ClinicNet / ODONTIS Enterprise
+# ClinicNet
 
 Мультитенантная (сеть клиник) backend-платформа на Django + DRF +
 [django-tenants](https://django-tenants.readthedocs.io/) (schema-per-tenant
 изоляция на уровне Postgres). Разработка ведётся по фазам — см.
-[`docs/ODONTIS-Enterprise-Phased-Plan.md`](docs/ODONTIS-Enterprise-Phased-Plan.md).
+[`docs/ClinicNet-Master-Plan.md`](docs/ClinicNet-Master-Plan.md).
 
-**Текущая фаза: Фаза 1 — Фундамент** (Branch + RBAC v2 +
-мультифилиальное расписание). Дизайн и обоснование решений —
-[`docs/PHASE1-DESIGN.md`](docs/PHASE1-DESIGN.md).
+**Фаза 1 — Фундамент** (Branch + RBAC v2 + мультифилиальное расписание) —
+готово, дизайн в [`docs/PHASE1-DESIGN.md`](docs/PHASE1-DESIGN.md).
+
+**Текущая фаза: Фаза 2 — Клинический контур** (единая ЭМК + модуль
+направлений + базовая диагностика). Срез 1 (модели/миграции) и срез 2
+(API направлений: actions, RBAC, уведомления, `available-slots`) готовы —
+дизайн в [`docs/PHASE2-REFERRALS-DESIGN.md`](docs/PHASE2-REFERRALS-DESIGN.md),
+спецификация направлений — [`docs/ClinicNet-Referrals-Prompt.md`](docs/ClinicNet-Referrals-Prompt.md).
+Осталось: (c) базовая диагностика, frontend.
 
 ## Стек
 
@@ -47,10 +53,13 @@ python manage.py runserver
 config/            # settings, urls (tenant-схема и public-схема отдельно)
 apps/
   tenants/         # Client/Domain — public-схема, реестр сетей клиник
-  accounts/        # User, RBAC v2 (Role/Permission/UserRole), проверка прав
+  accounts/        # User, Specialty, RBAC v2 (Role/Permission/UserRole), проверка прав
   branches/        # Branch, StaffBranchAssignment (график по филиалам)
-  patients/        # Patient (минимальная карточка, полноценная ЭМК — Фаза 2)
+  patients/        # Patient — единая карта пациента, видна на всю сеть
   scheduling/       # Appointment (обязательно привязан к branch)
+  visits/          # Visit — клиническая запись приёма (Фаза 2)
+  referrals/       # Referral — направления между врачами + API/actions (Фаза 2)
+  notifications/   # Notification — внутренний инбокс (без WA/Telegram-провода)
 docs/              # мастер-план по фазам + дизайн-документы фаз
 ```
 
