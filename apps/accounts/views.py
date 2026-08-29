@@ -5,6 +5,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import Permission, Role, Specialty, User, UserRole
+from .rbac import branches_for_permission
 from .serializers import (
     DoctorSerializer,
     PermissionSerializer,
@@ -31,6 +32,18 @@ class MeView(APIView):
             }
             for ur in user.user_roles.filter(is_active=True).select_related("role")
         ]
+        # Precomputed via the same rbac.branches_for_permission() the
+        # backend itself uses to filter — not something the frontend
+        # reconstructs from the raw `roles` above (own_branch scope, in
+        # particular, depends on StaffBranchAssignment, which isn't in
+        # `roles` at all). This is what ReferralQueueWidget.vue's
+        # client-side re-check verifies each row against: an independent
+        # fetch, not a trust of whatever ReferralViewSet.get_queryset
+        # already returned — see its own docstring.
+        data["referral_branches"] = sorted(
+            set(branches_for_permission(user, "referrals.view").values_list("id", flat=True))
+            | set(branches_for_permission(user, "referrals.manage").values_list("id", flat=True))
+        )
         return Response(data)
 
 

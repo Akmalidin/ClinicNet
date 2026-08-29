@@ -218,6 +218,75 @@ class DoctorSpecialtyAPITests(TenantTestCase):
         self.assertEqual(ids, {self.dr_b.pk})
 
 
+class MeReferralBranchesTests(TenantTestCase):
+    """MeView's referral_branches — what ReferralQueueWidget.vue's
+    client-side branch-scope re-check verifies each row against (its own
+    docstring: never trust that the backend's queryset already filtered
+    correctly, silently)."""
+
+    def setUp(self):
+        self.branch_a = Branch.objects.create(name="Филиал А", code="a")
+        self.branch_b = Branch.objects.create(name="Филиал Б", code="b")
+
+        view_perm = Permission.objects.create(code="referrals.view", category="referrals")
+        manage_perm = Permission.objects.create(code="referrals.manage", category="referrals")
+
+        plain_doctor_role = Role.objects.create(name="Врач", codename="doctor")
+        # No referrals.view/manage — matches the real seed_rbac (see
+        # apps/referrals/permissions.py's docstring): "own" is unconditional,
+        # not scope-gated, so a plain doctor should see [] here.
+
+        coordinator_role = Role.objects.create(name="Координатор филиала", codename="branch-admin")
+        RolePermission.objects.create(role=coordinator_role, permission=view_perm)
+        RolePermission.objects.create(role=coordinator_role, permission=manage_perm)
+
+        network_admin_role = Role.objects.create(name="Администратор сети", codename="network-admin")
+        RolePermission.objects.create(role=network_admin_role, permission=view_perm)
+
+        self.plain_doctor = User.objects.create(username="plain_doc")
+        UserRole.objects.create(user=self.plain_doctor, role=plain_doctor_role, branch_scope=BranchScope.OWN_BRANCH)
+        StaffBranchAssignment.objects.create(
+            staff=self.plain_doctor, branch=self.branch_a, weekday=Weekday.MONDAY,
+            start_time=time(9, 0), end_time=time(17, 0),
+        )
+
+        self.coordinator = User.objects.create(username="coordinator")
+        UserRole.objects.create(
+            user=self.coordinator, role=coordinator_role, branch_scope=BranchScope.OWN_BRANCH
+        )
+        StaffBranchAssignment.objects.create(
+            staff=self.coordinator, branch=self.branch_a, weekday=Weekday.MONDAY,
+            start_time=time(9, 0), end_time=time(17, 0),
+        )
+
+        self.network_admin = User.objects.create(username="net_admin")
+        UserRole.objects.create(user=self.network_admin, role=network_admin_role, branch_scope=BranchScope.ALL)
+
+        self.tenant_host = self.domain.domain
+
+    def _me(self, user):
+        client = APIClient()
+        client.force_authenticate(user=user)
+        return client.get("/api/v1/me/", HTTP_HOST=self.tenant_host)
+
+    def test_plain_doctor_has_no_referral_branches(self):
+        response = self._me(self.plain_doctor)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["referral_branches"], [])
+
+    def test_coordinator_sees_only_their_own_branch(self):
+        response = self._me(self.coordinator)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["referral_branches"], [self.branch_a.pk])
+
+    def test_network_admin_sees_every_branch(self):
+        response = self._me(self.network_admin)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            set(response.json()["referral_branches"]), {self.branch_a.pk, self.branch_b.pk}
+        )
+
+
 class UsersWithPermissionTests(TenantTestCase):
     """Reverse lookup used by apps.referrals' escalate_stale_referrals:
     given a branch, who holds this permission there?"""
