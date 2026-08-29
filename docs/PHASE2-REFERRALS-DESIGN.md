@@ -59,12 +59,25 @@
 * То же самое через реальный HTTP (`runserver` + `curl` с JWT и Host-заголовком тенант-домена) для найденного бага карты пациента — до и после исправления.
 * Автотесты (`TenantTestCase`, реальная Postgres-схема на каждый прогон): `apps/patients/tests.py` (регрессия бага карты), `apps/visits/tests.py`, `apps/referrals/tests.py` — 27 тестов всего (16 из Фазы 1 + 11 новых), все зелёные.
 
-## 6. Что дальше (не в этом заходе)
+## 6. Срез 2: API-слой направлений
 
-По плану («Последовательность реализации» шаги 2–9 из спеки, адаптированные под этот проект):
-- Сериализаторы + `ReferralViewSet` (базовый CRUD) + `HasReferralPermission` (нужен отдельный класс — у `Referral` два филиала, `from_branch`/`to_branch`, а не один `.branch`, как у `Appointment`/`StaffBranchAssignment`, поэтому существующий `HasBranchPermission` не подходит напрямую).
-- `schedule`/`decline`/`complete` actions + сигнал на `Appointment.status → completed`.
-- Внутренний `Notification`-объект (без реального WA/Telegram-провода) + `escalate_stale_referrals` management-команда.
-- `available-slots` — новая логика (смены `StaffBranchAssignment` минус занятые `Appointment`), в спеке это "прокси", но переиспользовать в проекте нечего.
+Реализовано поверх среза 1 (отдельная ветка/PR, т.к. срез 1 ещё не смёржен в `main`):
+
+* `apps/notifications` (новое приложение) — внутренний `Notification`-инбокс (`recipient`, опциональный `referral`, `title`, `body`, `is_read`). Без реального WA/Telegram-провода — как согласовано; `GET/PATCH /api/v1/notifications/` только свои, `title`/`body` только на чтение.
+* `apps/referrals/permissions.py::HasReferralPermission` — отдельный класс (у `Referral` два филиала, `from_branch`/`to_branch`, а не один `.branch`). Ключуется по `view.action`, а не по HTTP-методу — иначе кастомный `@action` (`POST .../schedule/`) и обычный `create` (тоже `POST`) было не различить. **Найденный и исправленный баг**: `has_permission` (view-level, до получения объекта) изначально требовал `referrals.manage` для всех detail-действий — это ломало "своё" (`from_doctor`/`to_doctor`) для врача, у которого есть только `referrals.view`: пользователь получал бы 403 раньше, чем срабатывал bypass на `has_object_permission`. Исправлено: для detail-действий `has_permission` теперь пропускает любого залогиненного, а реальная проверка (включая bypass "своего") — целиком в `has_object_permission`. Регрессионный тест — `test_own_bypass_lets_view_only_recipient_decline`.
+* `ReferralSerializer` — валидация через `Referral.clean()` (паттерн `AppointmentSerializer` из Фазы 1, не дублирование правил в сериализаторе). `from_doctor`/`status`/`target_appointment`/таймстемпы — read-only (проставляются вьюсетом/actions, не клиентом).
+* `ReferralViewSet` — `get_queryset` = "своё" (`from_doctor`/`to_doctor` = я) ИЛИ branch-scoped через `referrals.view`/`referrals.manage`; `?branch=`/`?cross_branch_only=` как в спеке. `schedule` (проверяет, что запись — у нужного врача в нужном филиале; если направление было "на специальность" — `to_doctor` проставляется по записи), `decline` (обязателен `outcome_note`), `complete`.
+* `apps/referrals/signals.py` — `Appointment.status → completed` (если есть привязанный `Referral`) → `mark_completed()` + уведомление, как в спеке раздел 5.
+* `GET /api/v1/referrals/available_slots/?doctor=&date=` — реальный расчёт (смены `StaffBranchAssignment` на день недели минус занятые активные `Appointment`, с учётом часового пояса филиала через `zoneinfo`), не прокси — переиспользовать в проекте было нечего.
+* `escalate_stale_referrals` (management-команда, под cron) — `PENDING` > 24ч → уведомление всем, у кого есть `referrals.manage` на `to_branch` направления. Понадобился новый обратный RBAC-запрос — `apps.accounts.rbac.users_with_permission(branch, code)` (обратное к `branches_for_permission`: не "какие филиалы видит пользователь", а "кто видит этот филиал"). Идемпотентна (проверено вручную двумя прогонами подряд).
+
+**Не реализовано, вне спеки/сознательно отложено:** `SCHEDULED → ACCEPTED` и произвольная `CANCELLED` не имеют выделенных action-эндпоинтов в спеке (раздел 3) — не изобретал их сам, чтобы не расширять API-поверхность без запроса.
+
+**Проверено:** 43/43 автотеста (16 Фаза 1 + 11 срез 1 + 16 срез 2), `makemigrations --check` чисто. Вручную на `demo_clinic`: полный цикл через реальный HTTP (создание → уведомление → `schedule` с проверкой филиала/врача → `decline` без/с `outcome_note` → уведомление направившему), сигнал на завершение `Appointment` закрывает `Referral` автоматически, `available_slots` корректно исключает занятое время, `escalate_stale_referrals` шлёт и не дублирует уведомления при повторном запуске, координатор филиала (не участник направления лично) видит и обрабатывает направление через branch-scope RBAC, а не только через bypass "своего".
+
+## 7. Что дальше (не в этом заходе)
+
 - (c) Базовая диагностика — `LabOrder`/`LabResult`, отдельным заходом.
 - Frontend — вне текущего скоупа, отдельная задача по явному запросу.
+- Реальная интеграция WhatsApp/Telegram поверх `Notification`-инбокса.
+- `SCHEDULED → ACCEPTED` / произвольная отмена (`CANCELLED`) — если понадобятся, отдельным дополнением к API (см. выше).

@@ -6,3 +6,6 @@ class ReferralsConfig(AppConfig):
     name = "apps.referrals"
     label = "referrals"
     verbose_name = "Направления"
+
+    def ready(self):
+        from . import signals  # noqa: F401

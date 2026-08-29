@@ -9,9 +9,11 @@
 готово, дизайн в [`docs/PHASE1-DESIGN.md`](docs/PHASE1-DESIGN.md).
 
 **Текущая фаза: Фаза 2 — Клинический контур** (единая ЭМК + модуль
-направлений + базовая диагностика), первый срез (модели/миграции) готов —
+направлений + базовая диагностика). Срез 1 (модели/миграции) и срез 2
+(API направлений: actions, RBAC, уведомления, `available-slots`) готовы —
 дизайн в [`docs/PHASE2-REFERRALS-DESIGN.md`](docs/PHASE2-REFERRALS-DESIGN.md),
 спецификация направлений — [`docs/ClinicNet-Referrals-Prompt.md`](docs/ClinicNet-Referrals-Prompt.md).
+Осталось: (c) базовая диагностика, frontend.
 
 ## Стек
 
@@ -56,7 +58,8 @@ apps/
   patients/        # Patient — единая карта пациента, видна на всю сеть
   scheduling/       # Appointment (обязательно привязан к branch)
   visits/          # Visit — клиническая запись приёма (Фаза 2)
-  referrals/       # Referral — направления между врачами (Фаза 2, модели)
+  referrals/       # Referral — направления между врачами + API/actions (Фаза 2)
+  notifications/   # Notification — внутренний инбокс (без WA/Telegram-провода)
 docs/              # мастер-план по фазам + дизайн-документы фаз
 ```
 

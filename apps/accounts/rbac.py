@@ -110,3 +110,38 @@ def branches_for_permission(user, code: str):
             )
 
     return Branch.objects.filter(pk__in=branch_ids)
+
+
+def users_with_permission(branch, code: str):
+    """Reverse of `branches_for_permission`: which users hold `code` for
+    `branch`? Used for "who's responsible for this branch" lookups (e.g.
+    apps.referrals' escalate_stale_referrals — who to notify about a
+    branch's stalled referrals). Superusers are deliberately NOT included
+    here: this is "who should get paged", not an access check.
+    """
+    from django.db.models import Q
+
+    from .models import User
+
+    if branch is None:
+        return User.objects.none()
+
+    from apps.branches.models import StaffBranchAssignment
+
+    own_branch_staff_ids = set(
+        StaffBranchAssignment.objects.filter(branch=branch, is_active=True).values_list(
+            "staff_id", flat=True
+        )
+    )
+
+    return User.objects.filter(
+        Q(user_roles__is_active=True, user_roles__role__permissions__code=code)
+        & (
+            Q(user_roles__branch_scope=BranchScope.ALL)
+            | Q(
+                user_roles__branch_scope=BranchScope.SPECIFIC_BRANCHES,
+                user_roles__branches=branch,
+            )
+            | Q(user_roles__branch_scope=BranchScope.OWN_BRANCH, pk__in=own_branch_staff_ids)
+        )
+    ).distinct()
