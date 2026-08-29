@@ -5,3 +5,4 @@ djangorestframework-simplejwt>=5.3,<5.4
 psycopg2-binary>=2.9,<3.0
 django-filter>=24.3,<25.0
 python-decouple>=3.8,<4.0
+gunicorn>=22.0,<23.0
