@@ -56,8 +56,12 @@ ROLES = {
             "appointment.manage",
             "visit.view",
             "visit.manage",
-            "referrals.view",
-            "referrals.manage",
+            # referrals.view/manage НЕ выдаются врачу намеренно: это права
+            # координатора/сети на очередь ЦЕЛОГО филиала (own_branch-scope
+            # тут означало бы "видит весь список направлений своего
+            # филиала", а не только своё — ровно баг, найденный при ручной
+            # проверке RBAC-чек-листа). "Своё" (отправил/получил) доступно
+            # любому врачу без всякого гранта — см. HasReferralPermission.
         ],
     },
     "receptionist": {

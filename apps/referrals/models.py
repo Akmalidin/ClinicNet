@@ -18,6 +18,12 @@ class ReferralPriority(models.TextChoices):
     EMERGENCY = "emergency", "Экстренное"
 
 
+# Раздел 2 спеки: "любой → CANCELLED (кроме COMPLETED) — завершённое
+# направление неизменяемо". DECLINED в диаграмме тоже не имеет исходящих
+# переходов — считаем терминальным по той же логике.
+TERMINAL_STATUSES = (ReferralStatus.COMPLETED, ReferralStatus.DECLINED)
+
+
 class Referral(models.Model):
     """A bridge between two doctors (same branch or across branches),
     carrying visit context, tracked through to close.
@@ -109,10 +115,26 @@ class Referral(models.Model):
             raise ValidationError(
                 {"outcome_note": "При отклонении направления причина обязательна."}
             )
+        if self.pk:
+            original_status = (
+                Referral.objects.filter(pk=self.pk).values_list("status", flat=True).first()
+            )
+            if original_status in TERMINAL_STATUSES and original_status != self.status:
+                raise ValidationError(
+                    "Направление уже закрыто (%s) — статус больше нельзя менять."
+                    % ReferralStatus(original_status).label
+                )
 
-    def mark_completed(self, outcome_note: str = ""):
+    def mark_completed(self, outcome_note: str = "") -> bool:
+        """Returns False (no-op) if the referral is already terminal — safe
+        to call from a signal without risking an exception mid-save. The
+        `complete` API action checks status itself first so it can return a
+        proper 400 instead of a silent no-op."""
+        if self.status in TERMINAL_STATUSES:
+            return False
         self.status = ReferralStatus.COMPLETED
         self.completed_at = timezone.now()
         if outcome_note:
             self.outcome_note = outcome_note
         self.save(update_fields=["status", "completed_at", "outcome_note", "updated_at"])
+        return True

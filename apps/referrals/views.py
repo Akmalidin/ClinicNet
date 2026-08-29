@@ -27,17 +27,19 @@ SLOT_MINUTES = 30
 class ReferralViewSet(viewsets.ModelViewSet):
     serializer_class = ReferralSerializer
     permission_classes = [HasReferralPermission]
+    # No code for list/create/available_slots — HasReferralPermission only
+    # requires authentication there (see its docstring: "own" is an
+    # unconditional baseline, referrals.view/manage are the coordinator/
+    # network escalation, applied via get_queryset below and via
+    # has_object_permission for the other actions).
     required_permission = {
-        "list": "referrals.view",
         "retrieve": "referrals.view",
-        "create": "referrals.manage",
         "update": "referrals.manage",
         "partial_update": "referrals.manage",
         "destroy": "referrals.manage",
         "schedule": "referrals.manage",
         "decline": "referrals.manage",
         "complete": "referrals.manage",
-        "available_slots": "referrals.view",
     }
     filterset_fields = ["status", "priority", "to_doctor", "from_doctor"]
 
@@ -131,7 +133,10 @@ class ReferralViewSet(viewsets.ModelViewSet):
         Appointment.status -> completed, см. apps/referrals/signals.py —
         это ручной путь для завершения без привязанной записи)."""
         referral = self.get_object()
-        referral.mark_completed(request.data.get("outcome_note", ""))
+        if not referral.mark_completed(request.data.get("outcome_note", "")):
+            return Response(
+                {"detail": "Направление уже закрыто и не может быть изменено."}, status=400
+            )
         notify_referral_completed(referral)
         return Response(self.get_serializer(referral).data)
 

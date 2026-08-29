@@ -103,9 +103,14 @@ class ReferralAPITests(TenantTestCase):
 
         view_perm = Permission.objects.create(code="referrals.view", category="referrals")
         manage_perm = Permission.objects.create(code="referrals.manage", category="referrals")
+        # Matches the real seed_rbac: a plain doctor role gets NEITHER
+        # referrals.view NOR referrals.manage — "своё" (create/list/act on
+        # from_doctor==me or to_doctor==me) works unconditionally via
+        # HasReferralPermission's object-level bypass, no grant needed.
+        # referrals.view/manage are the coordinator/network escalation —
+        # see test_plain_doctor_does_not_see_branch_queue below and
+        # CoordinatorQueueVisibilityTests for what those grants unlock.
         doctor_role = Role.objects.create(name="Врач", codename="doctor")
-        RolePermission.objects.create(role=doctor_role, permission=view_perm)
-        RolePermission.objects.create(role=doctor_role, permission=manage_perm)
 
         view_only_role = Role.objects.create(name="Врач (только просмотр)", codename="doctor-view-only")
         RolePermission.objects.create(role=view_only_role, permission=view_perm)
@@ -301,3 +306,114 @@ class ReferralAPITests(TenantTestCase):
         self.assertTrue(len(slots) > 0)
         starts = {s["starts_at"] for s in slots}
         self.assertFalse(any("10:00:00" in s for s in starts))  # busy slot excluded
+
+    def test_completed_referral_cannot_be_reopened(self):
+        """Manual-check item 4: a terminal (COMPLETED/DECLINED) referral is
+        truly immutable — no action can move it back to a non-terminal
+        status."""
+        referral = Referral.objects.create(
+            patient=self.patient, from_doctor=self.from_doctor, to_doctor=self.to_doctor,
+            from_branch=self.branch_a, to_branch=self.branch_b, reason="Консультация",
+            status=ReferralStatus.COMPLETED, completed_at=timezone.now(),
+        )
+        client = self._client_for(self.to_doctor)
+
+        response = client.post(
+            f"/api/v1/referrals/{referral.pk}/decline/",
+            {"outcome_note": "Передумал"},
+            HTTP_HOST=self.host,
+        )
+        self.assertEqual(response.status_code, 400)
+
+        response = client.post(f"/api/v1/referrals/{referral.pk}/complete/", {}, HTTP_HOST=self.host)
+        self.assertEqual(response.status_code, 400)
+
+        referral.refresh_from_db()
+        self.assertEqual(referral.status, ReferralStatus.COMPLETED)
+
+    def test_declined_referral_cannot_be_completed(self):
+        referral = Referral.objects.create(
+            patient=self.patient, from_doctor=self.from_doctor, to_doctor=self.to_doctor,
+            from_branch=self.branch_a, to_branch=self.branch_b, reason="Консультация",
+            status=ReferralStatus.DECLINED, outcome_note="Не моя специализация",
+        )
+        client = self._client_for(self.to_doctor)
+        response = client.post(f"/api/v1/referrals/{referral.pk}/complete/", {}, HTTP_HOST=self.host)
+        self.assertEqual(response.status_code, 400)
+        referral.refresh_from_db()
+        self.assertEqual(referral.status, ReferralStatus.DECLINED)
+
+    def test_plain_doctor_does_not_see_branch_queue(self):
+        """Manual-check item 5: a doctor without an elevated (coordinator/
+        network) referrals.view grant sees only what they personally sent
+        or received — not the whole branch/network queue. doctor_role in
+        setUp grants neither referrals.view nor referrals.manage, matching
+        the real seed_rbac."""
+        other_patient = Patient.objects.create(first_name="Другой", last_name="Пациент")
+        unrelated_referral = Referral.objects.create(
+            patient=other_patient, from_doctor=self.to_doctor, to_doctor=None,
+            to_specialty=Specialty.objects.create(name="Хирургия", code="surgery"),
+            from_branch=self.branch_b, to_branch=self.branch_b,
+            reason="Направление, к которому from_doctor не имеет отношения",
+        )
+        client = self._client_for(self.from_doctor)
+        response = client.get("/api/v1/referrals/", HTTP_HOST=self.host)
+        self.assertEqual(response.status_code, 200)
+        ids = {row["id"] for row in response.json()}
+        self.assertNotIn(unrelated_referral.pk, ids)
+
+
+class CoordinatorQueueVisibilityTests(TenantTestCase):
+    """The referrals.view/referrals.manage escalation — a branch coordinator
+    sees and can act on the WHOLE branch queue, not just their own, even
+    though they're neither from_doctor nor to_doctor on most of it."""
+
+    def setUp(self):
+        self.branch_a = Branch.objects.create(name="Филиал А", code="a")
+        self.branch_b = Branch.objects.create(name="Филиал Б", code="b")
+        self.patient = Patient.objects.create(first_name="Тест", last_name="Пациентов")
+
+        view_perm = Permission.objects.create(code="referrals.view", category="referrals")
+        manage_perm = Permission.objects.create(code="referrals.manage", category="referrals")
+        coordinator_role = Role.objects.create(name="Координатор филиала", codename="branch-admin")
+        RolePermission.objects.create(role=coordinator_role, permission=view_perm)
+        RolePermission.objects.create(role=coordinator_role, permission=manage_perm)
+
+        self.doctor_a = User.objects.create(username="doc_a")
+        self.doctor_b = User.objects.create(username="doc_b")
+
+        self.coordinator = User.objects.create(username="coordinator_b")
+        UserRole.objects.create(
+            user=self.coordinator, role=coordinator_role, branch_scope=BranchScope.OWN_BRANCH
+        )
+        StaffBranchAssignment.objects.create(
+            staff=self.coordinator, branch=self.branch_b, weekday=Weekday.MONDAY,
+            start_time=time(9, 0), end_time=time(17, 0),
+        )
+
+        # Coordinator is neither from_doctor nor to_doctor on this one.
+        self.referral = Referral.objects.create(
+            patient=self.patient, from_doctor=self.doctor_a, to_doctor=self.doctor_b,
+            from_branch=self.branch_a, to_branch=self.branch_b,
+            reason="Координатор не участвует лично",
+        )
+        self.host = self.domain.domain
+
+    def _client_for(self, user):
+        client = APIClient()
+        client.force_authenticate(user=user)
+        return client
+
+    def test_coordinator_sees_referral_in_their_branch_queue(self):
+        response = self._client_for(self.coordinator).get("/api/v1/referrals/", HTTP_HOST=self.host)
+        self.assertEqual(response.status_code, 200)
+        ids = {row["id"] for row in response.json()}
+        self.assertIn(self.referral.pk, ids)
+
+    def test_coordinator_can_decline_referral_not_personally_theirs(self):
+        response = self._client_for(self.coordinator).post(
+            f"/api/v1/referrals/{self.referral.pk}/decline/",
+            {"outcome_note": "Врач в отпуске"},
+            HTTP_HOST=self.host,
+        )
+        self.assertEqual(response.status_code, 200, response.data)

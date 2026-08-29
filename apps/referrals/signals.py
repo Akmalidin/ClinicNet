@@ -8,7 +8,6 @@ from django.dispatch import receiver
 
 from apps.scheduling.models import Appointment, AppointmentStatus
 
-from .models import ReferralStatus
 from .services import notify_referral_completed
 
 
@@ -19,7 +18,11 @@ def complete_referral_on_appointment_completed(sender, instance, **kwargs):
     # ReverseOneToOneDescriptor.RelatedObjectDoesNotExist subclasses
     # AttributeError, so getattr's default covers "no referral attached".
     referral = getattr(instance, "referral", None)
-    if referral is None or referral.status == ReferralStatus.COMPLETED:
+    if referral is None:
         return
-    referral.mark_completed()
-    notify_referral_completed(referral)
+    # mark_completed() itself no-ops (returns False) if the referral is
+    # already terminal (COMPLETED or — e.g. it was DECLINED after
+    # scheduling but its target_appointment still got closed — DECLINED),
+    # so this never re-fires the notification or reopens a closed referral.
+    if referral.mark_completed():
+        notify_referral_completed(referral)
