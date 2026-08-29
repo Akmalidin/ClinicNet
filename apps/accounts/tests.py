@@ -6,7 +6,7 @@ from rest_framework.test import APIClient
 from apps.branches.models import Branch, StaffBranchAssignment, Weekday
 
 from .models import BranchScope, Permission, Role, RolePermission, User, UserRole
-from .rbac import branches_for_permission, has_any_permission, has_permission
+from .rbac import branches_for_permission, has_any_permission, has_permission, users_with_permission
 
 
 class RBACScopeTests(TenantTestCase):
@@ -133,3 +133,43 @@ class BranchScopedAPITests(TenantTestCase):
     def test_branch_list_explicit_filter_out_of_scope_is_forbidden(self):
         response = self._get(f"/api/v1/branch-assignments/?branch={self.branch_b.pk}")
         self.assertEqual(response.status_code, 403)
+
+
+class UsersWithPermissionTests(TenantTestCase):
+    """Reverse lookup used by apps.referrals' escalate_stale_referrals:
+    given a branch, who holds this permission there?"""
+
+    def setUp(self):
+        self.branch_a = Branch.objects.create(name="Филиал А", code="a")
+        self.branch_b = Branch.objects.create(name="Филиал Б", code="b")
+        self.permission = Permission.objects.create(code="referrals.manage", category="referrals")
+        self.role = Role.objects.create(name="Координатор", codename="coordinator")
+        RolePermission.objects.create(role=self.role, permission=self.permission)
+
+    def test_all_scope_user_is_included_for_any_branch(self):
+        user = User.objects.create(username="network_admin")
+        UserRole.objects.create(user=user, role=self.role, branch_scope=BranchScope.ALL)
+        self.assertIn(user, users_with_permission(self.branch_a, "referrals.manage"))
+        self.assertIn(user, users_with_permission(self.branch_b, "referrals.manage"))
+
+    def test_own_branch_user_only_covers_their_staffed_branch(self):
+        user = User.objects.create(username="branch_admin")
+        UserRole.objects.create(user=user, role=self.role, branch_scope=BranchScope.OWN_BRANCH)
+        StaffBranchAssignment.objects.create(
+            staff=user, branch=self.branch_a, weekday=Weekday.MONDAY,
+            start_time=time(9, 0), end_time=time(17, 0),
+        )
+        self.assertIn(user, users_with_permission(self.branch_a, "referrals.manage"))
+        self.assertNotIn(user, users_with_permission(self.branch_b, "referrals.manage"))
+
+    def test_specific_branches_user(self):
+        user = User.objects.create(username="multi_branch_admin")
+        ur = UserRole.objects.create(user=user, role=self.role, branch_scope=BranchScope.SPECIFIC_BRANCHES)
+        ur.branches.set([self.branch_b])
+        self.assertNotIn(user, users_with_permission(self.branch_a, "referrals.manage"))
+        self.assertIn(user, users_with_permission(self.branch_b, "referrals.manage"))
+
+    def test_unrelated_permission_excludes_user(self):
+        user = User.objects.create(username="doctor")
+        UserRole.objects.create(user=user, role=self.role, branch_scope=BranchScope.ALL)
+        self.assertNotIn(user, users_with_permission(self.branch_a, "patient.manage"))
