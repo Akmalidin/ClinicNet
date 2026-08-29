@@ -18,6 +18,7 @@ from apps.branches.models import Branch, StaffBranchAssignment, Weekday
 from apps.notifications.models import Notification
 from apps.patients.models import Patient
 from apps.scheduling.models import Appointment, AppointmentStatus
+from apps.visits.models import Visit
 
 from .models import Referral, ReferralStatus
 
@@ -162,6 +163,42 @@ class ReferralAPITests(TenantTestCase):
 
         notification = Notification.objects.get(referral_id=response.data["id"])
         self.assertEqual(notification.recipient_id, self.to_doctor.pk)
+
+    def test_diagnosis_snapshot_is_copied_from_source_visit_not_client(self):
+        """"Снапшот, не живая ссылка" (Referral docstring) has to come from
+        the server's read of source_visit at creation time — never from
+        whatever a client sends, or a stale/forged snapshot could pass
+        through untouched. Also covers the frontend's actual create call
+        (ReferralModal.vue), which never sends diagnosis_snapshot at all."""
+        visit = Visit.objects.create(
+            patient=self.patient, doctor=self.from_doctor, branch=self.branch_a,
+            reason="Осмотр", diagnosis_snapshot={"teeth": ["11", "21"], "note": "кариес"},
+        )
+        client = self._client_for(self.from_doctor)
+        response = client.post(
+            "/api/v1/referrals/",
+            {
+                "patient": self.patient.pk,
+                "to_doctor": self.to_doctor.pk,
+                "from_branch": self.branch_a.pk,
+                "to_branch": self.branch_b.pk,
+                "source_visit": visit.pk,
+                "reason": "Ортодонтическая консультация",
+                # Attempting to smuggle a different snapshot — must be ignored.
+                "diagnosis_snapshot": {"teeth": ["forged"]},
+            },
+            format="json",
+            HTTP_HOST=self.host,
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["diagnosis_snapshot"], visit.diagnosis_snapshot)
+
+        # Later edits to the visit must NOT retroactively change the
+        # referral's snapshot — that's the whole point of a snapshot.
+        visit.diagnosis_snapshot = {"teeth": ["changed-after-referral"]}
+        visit.save()
+        referral = Referral.objects.get(pk=response.data["id"])
+        self.assertEqual(referral.diagnosis_snapshot, {"teeth": ["11", "21"], "note": "кариес"})
 
     def test_create_by_specialty_sends_no_notification_yet(self):
         ortho = Specialty.objects.create(name="Ортодонтия", code="ortho")

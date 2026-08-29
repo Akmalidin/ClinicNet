@@ -69,7 +69,14 @@ class ReferralViewSet(viewsets.ModelViewSet):
         return qs
 
     def perform_create(self, serializer):
-        referral = serializer.save(from_doctor=self.request.user)
+        # diagnosis_snapshot is meant to be a snapshot of the source visit
+        # AT THE MOMENT OF REFERRAL (see Referral docstring / the model's
+        # own comment) — captured server-side from source_visit, same as
+        # from_doctor, rather than trusted from the client (see
+        # ReferralSerializer.read_only_fields).
+        source_visit = serializer.validated_data.get("source_visit")
+        snapshot = source_visit.diagnosis_snapshot if source_visit else {}
+        referral = serializer.save(from_doctor=self.request.user, diagnosis_snapshot=snapshot)
         notify_referral_created(referral)
 
     @action(detail=True, methods=["post"])

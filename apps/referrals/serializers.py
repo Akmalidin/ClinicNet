@@ -38,8 +38,12 @@ class ReferralSerializer(serializers.ModelSerializer):
         # raw PATCH — matches ClinicNet-Referrals-Prompt.md section 3.
         # from_doctor is always request.user (see ReferralViewSet.perform_create),
         # never client-supplied — you can't send a referral "from" someone else.
+        # diagnosis_snapshot is likewise always derived server-side from
+        # source_visit at creation time (perform_create) — the whole point
+        # of "snapshot, not live link" (see the model's docstring) is that
+        # it can't be handed in and diverge from what the visit actually said.
         read_only_fields = [
-            "id", "from_doctor", "status", "target_appointment",
+            "id", "from_doctor", "status", "target_appointment", "diagnosis_snapshot",
             "created_at", "updated_at", "scheduled_at", "completed_at",
         ]
 

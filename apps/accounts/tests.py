@@ -5,7 +5,7 @@ from rest_framework.test import APIClient
 
 from apps.branches.models import Branch, StaffBranchAssignment, Weekday
 
-from .models import BranchScope, Permission, Role, RolePermission, User, UserRole
+from .models import BranchScope, Permission, Role, RolePermission, Specialty, User, UserRole
 from .rbac import branches_for_permission, has_any_permission, has_permission, users_with_permission
 
 
@@ -133,6 +133,74 @@ class BranchScopedAPITests(TenantTestCase):
     def test_branch_list_explicit_filter_out_of_scope_is_forbidden(self):
         response = self._get(f"/api/v1/branch-assignments/?branch={self.branch_b.pk}")
         self.assertEqual(response.status_code, 403)
+
+
+class DoctorSpecialtyAPITests(TenantTestCase):
+    """The referral frontend's doctor/specialty pickers — feeds
+    ReferralModal.vue's "выбор врача" (same-branch) and "специальность ->
+    филиал -> врач" (cross-branch) steps, see docs/ClinicNet-Referrals-Prompt.md
+    section 6."""
+
+    def setUp(self):
+        self.branch_a = Branch.objects.create(name="Филиал А", code="a")
+        self.branch_b = Branch.objects.create(name="Филиал Б", code="b")
+        self.ortho = Specialty.objects.create(name="Ортодонтия", code="ortho")
+        self.surgery = Specialty.objects.create(name="Хирургия", code="surgery")
+
+        doctor_role = Role.objects.create(name="Врач", codename="doctor")
+        admin_role = Role.objects.create(name="Администратор", codename="branch-admin")
+
+        self.dr_a = User.objects.create(username="dr_a", first_name="Аида", last_name="А.")
+        self.dr_a.specialties.add(self.ortho)
+        UserRole.objects.create(user=self.dr_a, role=doctor_role, branch_scope=BranchScope.OWN_BRANCH)
+        StaffBranchAssignment.objects.create(
+            staff=self.dr_a, branch=self.branch_a, weekday=Weekday.MONDAY,
+            start_time=time(9, 0), end_time=time(17, 0),
+        )
+
+        self.dr_b = User.objects.create(username="dr_b", first_name="Бек", last_name="Б.")
+        self.dr_b.specialties.add(self.surgery)
+        UserRole.objects.create(user=self.dr_b, role=doctor_role, branch_scope=BranchScope.OWN_BRANCH)
+        StaffBranchAssignment.objects.create(
+            staff=self.dr_b, branch=self.branch_b, weekday=Weekday.MONDAY,
+            start_time=time(9, 0), end_time=time(17, 0),
+        )
+
+        # Not a doctor — must never show up in the referral doctor picker,
+        # even though they're an authenticated staff member with a role.
+        self.receptionist = User.objects.create(username="reception")
+        UserRole.objects.create(user=self.receptionist, role=admin_role, branch_scope=BranchScope.OWN_BRANCH)
+
+        self.client_api = APIClient()
+        self.client_api.force_authenticate(user=self.dr_a)
+        self.tenant_host = self.domain.domain
+
+    def _get(self, path):
+        return self.client_api.get(path, HTTP_HOST=self.tenant_host)
+
+    def test_specialties_list(self):
+        response = self._get("/api/v1/specialties/")
+        self.assertEqual(response.status_code, 200)
+        codes = {row["code"] for row in response.json()}
+        self.assertEqual(codes, {"ortho", "surgery"})
+
+    def test_doctor_list_excludes_non_doctors(self):
+        response = self._get("/api/v1/doctors/")
+        self.assertEqual(response.status_code, 200)
+        ids = {row["id"] for row in response.json()}
+        self.assertEqual(ids, {self.dr_a.pk, self.dr_b.pk})
+
+    def test_doctor_list_filtered_by_branch(self):
+        response = self._get(f"/api/v1/doctors/?branch={self.branch_a.pk}")
+        self.assertEqual(response.status_code, 200)
+        ids = {row["id"] for row in response.json()}
+        self.assertEqual(ids, {self.dr_a.pk})
+
+    def test_doctor_list_filtered_by_specialty(self):
+        response = self._get(f"/api/v1/doctors/?specialty={self.surgery.code}")
+        self.assertEqual(response.status_code, 200)
+        ids = {row["id"] for row in response.json()}
+        self.assertEqual(ids, {self.dr_b.pk})
 
 
 class UsersWithPermissionTests(TenantTestCase):
