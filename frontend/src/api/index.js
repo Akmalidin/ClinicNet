@@ -15,6 +15,12 @@ export const meApi = {
 
 export const branchesApi = {
   list: () => client.get('branches/'),
+  // Every active branch in the network (id/name/code only) — NOT scoped by
+  // branch.view like list() above. Needed for the cross-branch referral
+  // picker: a plain doctor's branch.view only covers their own branch, but
+  // routing a referral requires seeing every branch to route *to*. See
+  // apps/branches/views.py BranchDirectoryView's docstring.
+  directory: () => client.get('branches/directory/'),
 }
 
 export const patientsApi = {
