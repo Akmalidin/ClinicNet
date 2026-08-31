@@ -40,6 +40,9 @@ PERMISSIONS = [
     ("inpatient.order.perform", "inpatient", "Отметка о выполнении назначения (постовая медсестра)"),
     ("inpatient.vitals.view", "inpatient", "Просмотр листа наблюдения своего отделения/филиала"),
     ("inpatient.vitals.manage", "inpatient", "Добавление замера в лист наблюдения"),
+    ("inpatient.operation.view", "inpatient", "Просмотр операций своего отделения/филиала"),
+    ("inpatient.operation.manage", "inpatient", "Планирование/отмена/завершение операции"),
+    ("inpatient.operation.checklist", "inpatient", "Подтверждение этапов чек-листа безопасности хирургии"),
 ]
 
 # codename -> (name, is_system, branch-agnostic description, permission codes)
@@ -103,6 +106,9 @@ ROLES = {
             "inpatient.order.perform",
             "inpatient.vitals.view",
             "inpatient.vitals.manage",
+            "inpatient.operation.view",
+            "inpatient.operation.manage",
+            "inpatient.operation.checklist",
         ],
     },
     "doctor": {
@@ -141,6 +147,9 @@ ROLES = {
             "inpatient.order.perform",
             "inpatient.vitals.view",
             "inpatient.vitals.manage",
+            "inpatient.operation.view",
+            "inpatient.operation.manage",
+            "inpatient.operation.checklist",
             # referrals.view/manage НЕ выдаются врачу намеренно: это права
             # координатора/сети на очередь ЦЕЛОГО филиала (own_branch-scope
             # тут означало бы "видит весь список направлений своего
@@ -198,6 +207,9 @@ ROLES = {
             "inpatient.order.perform",
             "inpatient.vitals.view",
             "inpatient.vitals.manage",
+            "inpatient.operation.view",
+            "inpatient.operation.manage",
+            "inpatient.operation.checklist",
         ],
         # Department-scoped, NOT branch-scoped: provision this role's
         # UserRole with branch_scope=SPECIFIC_BRANCHES and NO branches
@@ -224,6 +236,13 @@ ROLES = {
             # и видит).
             "inpatient.vitals.view",
             "inpatient.vitals.manage",
+            "inpatient.operation.view",
+            # Операционная медсестра подтверждает этапы чек-листа
+            # (в кабинете, вместе с хирургом/анестезиологом) — та же
+            # логика, что order.perform: выполняет, не планирует.
+            # operation.manage (планирование/отмена/завершение операции)
+            # НЕ выдаётся намеренно.
+            "inpatient.operation.checklist",
         ],
         # Same department-scoped provisioning note as "department-head"
         # above — SPECIFIC_BRANCHES with no branches, real reach comes

@@ -5,6 +5,8 @@ from .models import (
     Bed,
     ClinicalOrder,
     Department,
+    Operation,
+    OperatingRoom,
     Room,
     StaffDepartmentAssignment,
     Transfer,
@@ -64,6 +66,24 @@ class TransferAdmin(admin.ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):
         return False
+
+
+@admin.register(OperatingRoom)
+class OperatingRoomAdmin(admin.ModelAdmin):
+    list_display = ("name", "branch", "is_active")
+    list_filter = ("branch", "is_active")
+    search_fields = ("name",)
+    autocomplete_fields = ("branch",)
+
+
+@admin.register(Operation)
+class OperationAdmin(admin.ModelAdmin):
+    list_display = (
+        "procedure_name", "admission", "operating_room", "lead_surgeon", "status", "starts_at",
+    )
+    list_filter = ("admission__department__branch", "operating_room", "status")
+    autocomplete_fields = ("admission", "operating_room", "lead_surgeon", "team")
+    date_hierarchy = "starts_at"
 
 
 @admin.register(ClinicalOrder)

@@ -6,6 +6,8 @@ from .models import (
     Bed,
     ClinicalOrder,
     Department,
+    Operation,
+    OperatingRoom,
     Room,
     StaffDepartmentAssignment,
     Transfer,
@@ -219,6 +221,63 @@ class VitalsRecordSerializer(serializers.ModelSerializer):
             pulse=attrs.get("pulse"),
             temperature=attrs.get("temperature"),
         )
+        try:
+            instance.clean()
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(
+                exc.message_dict if hasattr(exc, "message_dict") else exc.messages
+            )
+        return attrs
+
+
+class OperatingRoomSerializer(serializers.ModelSerializer):
+    branch_name = serializers.CharField(source="branch.name", read_only=True)
+
+    class Meta:
+        model = OperatingRoom
+        fields = ("id", "branch", "branch_name", "name", "is_active")
+        read_only_fields = ("id",)
+
+
+class OperationSerializer(serializers.ModelSerializer):
+    patient_name = serializers.CharField(source="admission.patient.__str__", read_only=True)
+    operating_room_name = serializers.CharField(source="operating_room.name", read_only=True)
+    lead_surgeon_name = serializers.CharField(source="lead_surgeon.__str__", read_only=True)
+
+    class Meta:
+        model = Operation
+        fields = (
+            "id", "admission", "patient_name", "operating_room", "operating_room_name",
+            "procedure_name", "starts_at", "ends_at", "lead_surgeon", "lead_surgeon_name", "team",
+            "status",
+            "sign_in_confirmed_by", "sign_in_confirmed_at",
+            "time_out_confirmed_by", "time_out_confirmed_at",
+            "sign_out_confirmed_by", "sign_out_confirmed_at",
+            "created_at", "updated_at",
+        )
+        # Чек-лист (sign_in/time_out/sign_out) выставляется только через
+        # confirm_sign_in/confirm_time_out/confirm_sign_out actions —
+        # никогда сырым PATCH, тот же принцип, что статус у Invoice/
+        # Referral/LabOrder/Admission. status меняется только через
+        # complete/cancel actions.
+        read_only_fields = (
+            "id", "status",
+            "sign_in_confirmed_by", "sign_in_confirmed_at",
+            "time_out_confirmed_by", "time_out_confirmed_at",
+            "sign_out_confirmed_by", "sign_out_confirmed_at",
+            "created_at", "updated_at",
+        )
+
+    def validate(self, attrs):
+        existing = {
+            "admission": self.instance.admission, "operating_room": self.instance.operating_room,
+            "procedure_name": self.instance.procedure_name, "starts_at": self.instance.starts_at,
+            "ends_at": self.instance.ends_at, "lead_surgeon": self.instance.lead_surgeon,
+            "status": self.instance.status,
+        } if self.instance else {}
+        instance = Operation(pk=getattr(self.instance, "pk", None), **{**existing, **{
+            k: v for k, v in attrs.items() if k != "team"
+        }})
         try:
             instance.clean()
         except DjangoValidationError as exc:
