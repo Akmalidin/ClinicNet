@@ -21,6 +21,8 @@ PERMISSIONS = [
     ("referrals.manage", "referrals", "Создание/обработка направлений (schedule/decline/reassign)"),
     ("diagnostics.view", "diagnostics", "Просмотр заказов анализов и результатов"),
     ("diagnostics.manage", "diagnostics", "Заказ анализа, ввод результата, отмена заказа"),
+    ("finance.view", "finance", "Просмотр счетов, платежей и отчёта по кассе"),
+    ("finance.manage", "finance", "Выставление счетов, приём платежей и возвраты"),
 ]
 
 # codename -> (name, is_system, branch-agnostic description, permission codes)
@@ -47,6 +49,8 @@ ROLES = {
             "referrals.manage",
             "diagnostics.view",
             "diagnostics.manage",
+            "finance.view",
+            "finance.manage",
         ],
     },
     "doctor": {
@@ -83,6 +87,18 @@ ROLES = {
             # (schedule/decline/reassign — решение врача или координатора филиала)
             # и не пишет клинические заметки (visit.* нет намеренно).
             "referrals.view",
+        ],
+    },
+    "cashier": {
+        "name": "Кассир",
+        "is_system": True,
+        "permissions": [
+            "branch.view",
+            # Needs to look up whose invoice they're processing, not to
+            # manage patient records — patient.view only, no patient.manage.
+            "patient.view",
+            "finance.view",
+            "finance.manage",
         ],
     },
 }
