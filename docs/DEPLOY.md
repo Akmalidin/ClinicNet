@@ -122,8 +122,17 @@ sudo -u www-data venv/bin/pip install -r requirements.txt
 sudo -u www-data venv/bin/python manage.py collectstatic --noinput
 sudo -u www-data venv/bin/python manage.py migrate_schemas --shared --noinput
 sudo -u www-data venv/bin/python manage.py migrate_schemas --schema=clinicnet
+sudo -u www-data venv/bin/python manage.py tenant_command seed_rbac --schema=clinicnet
 systemctl restart clinicnet
 ```
+
+`seed_rbac` идемпотентна — безопасно гонять её при каждом обновлении, а
+не только когда точно знаешь, что добавились новые коды прав. Например,
+Phase 3 шаг (d) (склад, `apps.inventory`) добавил `inventory.manage` /
+`inventory.view` / `inventory.stock.manage` и выдал их существующим
+ролям (`branch-admin`, `doctor`) — без повторного запуска `seed_rbac`
+после `git pull` эти права не появятся у уже созданных ролей сети, и
+склад будет недоступен всем, у кого нет `network-admin`.
 
 ## Диагностика
 
