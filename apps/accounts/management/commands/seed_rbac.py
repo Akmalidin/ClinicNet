@@ -43,6 +43,8 @@ PERMISSIONS = [
     ("inpatient.operation.view", "inpatient", "Просмотр операций своего отделения/филиала"),
     ("inpatient.operation.manage", "inpatient", "Планирование/отмена/завершение операции"),
     ("inpatient.operation.checklist", "inpatient", "Подтверждение этапов чек-листа безопасности хирургии"),
+    ("churn.view", "churn", "Просмотр алертов оттока пациентов своего филиала"),
+    ("churn.manage", "churn", "Обработка алерта оттока (принять/отклонить/вернуть в работу)"),
 ]
 
 # codename -> (name, is_system, branch-agnostic description, permission codes)
@@ -109,6 +111,8 @@ ROLES = {
             "inpatient.operation.view",
             "inpatient.operation.manage",
             "inpatient.operation.checklist",
+            "churn.view",
+            "churn.manage",
         ],
     },
     "doctor": {
@@ -176,6 +180,13 @@ ROLES = {
             # already being theirs.
             "insurance.view",
             "insurance.policy.manage",
+            # "Координатор" из формулировки чек-листа Фазы 5 — это здесь
+            # ресепшн: обзванивает/пишет пациентам с просроченным
+            # интервалом, тот же фронт-офисный профиль, что уже ведёт
+            # patient.manage/appointment.manage. Врачу churn.* намеренно
+            # не выдан — это не клиническая, а операционная задача.
+            "churn.view",
+            "churn.manage",
         ],
     },
     "cashier": {
