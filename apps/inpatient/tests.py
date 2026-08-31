@@ -20,6 +20,7 @@ from .models import (
     Room,
     StaffDepartmentAssignment,
     Transfer,
+    VitalsRecord,
 )
 from .services import admit_patient, discharge_admission, transfer_admission
 
@@ -775,3 +776,132 @@ class ClinicalOrderAPIRBACTests(TenantTestCase):
         response = client.post(f"/api/v1/clinical-orders/{order.pk}/cancel/", {}, HTTP_HOST=self.host)
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual(response.data["status"], ClinicalOrderStatus.CANCELLED)
+
+
+class VitalsRecordModelTests(TenantTestCase):
+    def setUp(self):
+        self.branch = Branch.objects.create(name="Филиал А", code="a")
+        self.department = Department.objects.create(branch=self.branch, name="Терапия", code="therapy")
+        self.room = Room.objects.create(department=self.department, name="204")
+        self.bed = Bed.objects.create(room=self.room, label="1")
+        self.nurse = User.objects.create(username="nurse")
+        self.patient = Patient.objects.create(first_name="Тест", last_name="Пациентов")
+        self.admission = admit_patient(
+            patient=self.patient, department=self.department, bed=self.bed,
+            attending_doctor=self.nurse, admitted_by=self.nurse, diagnosis_at_admission="ОРВИ",
+        )
+
+    def test_requires_at_least_one_measurement(self):
+        record = VitalsRecord(admission=self.admission, recorded_by=self.nurse)
+        with self.assertRaises(ValidationError):
+            record.full_clean()
+
+    def test_a_single_measurement_is_enough(self):
+        record = VitalsRecord(admission=self.admission, recorded_by=self.nurse, pulse=78)
+        record.full_clean()  # does not raise
+
+    def test_cannot_record_for_discharged_admission(self):
+        discharge_admission(self.admission)
+        record = VitalsRecord(admission=self.admission, recorded_by=self.nurse, pulse=78)
+        with self.assertRaises(ValidationError):
+            record.full_clean()
+
+
+class VitalsRecordAPIRBACTests(TenantTestCase):
+    def setUp(self):
+        self.branch = Branch.objects.create(name="Филиал А", code="a")
+        self.dept_therapy = Department.objects.create(branch=self.branch, name="Терапия", code="therapy")
+        self.dept_surgery = Department.objects.create(branch=self.branch, name="Хирургия", code="surgery")
+        self.room = Room.objects.create(department=self.dept_therapy, name="204")
+        self.bed = Bed.objects.create(room=self.room, label="1")
+        self.patient = Patient.objects.create(first_name="Тест", last_name="Пациентов")
+
+        view_perm = Permission.objects.create(code="inpatient.vitals.view", category="inpatient")
+        manage_perm = Permission.objects.create(code="inpatient.vitals.manage", category="inpatient")
+        admission_manage_perm = Permission.objects.create(code="inpatient.admission.manage", category="inpatient")
+
+        doctor_role = Role.objects.create(name="Врач", codename="doctor")
+        for perm in (view_perm, manage_perm, admission_manage_perm):
+            RolePermission.objects.create(role=doctor_role, permission=perm)
+
+        nurse_role = Role.objects.create(name="Постовая медсестра", codename="nurse")
+        RolePermission.objects.create(role=nurse_role, permission=view_perm)
+        RolePermission.objects.create(role=nurse_role, permission=manage_perm)
+
+        self.doctor = User.objects.create(username="doc")
+        UserRole.objects.create(user=self.doctor, role=doctor_role, branch_scope=BranchScope.OWN_BRANCH)
+        StaffBranchAssignment.objects.create(
+            staff=self.doctor, branch=self.branch, weekday=Weekday.MONDAY,
+            start_time=time(9, 0), end_time=time(18, 0),
+        )
+
+        self.nurse_therapy = User.objects.create(username="nurse_therapy")
+        UserRole.objects.create(
+            user=self.nurse_therapy, role=nurse_role, branch_scope=BranchScope.SPECIFIC_BRANCHES
+        )
+        StaffDepartmentAssignment.objects.create(staff=self.nurse_therapy, department=self.dept_therapy)
+
+        self.nurse_surgery = User.objects.create(username="nurse_surgery")
+        UserRole.objects.create(
+            user=self.nurse_surgery, role=nurse_role, branch_scope=BranchScope.SPECIFIC_BRANCHES
+        )
+        StaffDepartmentAssignment.objects.create(staff=self.nurse_surgery, department=self.dept_surgery)
+
+        self.admission = admit_patient(
+            patient=self.patient, department=self.dept_therapy, bed=self.bed,
+            attending_doctor=self.doctor, admitted_by=self.doctor, diagnosis_at_admission="ОРВИ",
+        )
+        self.host = self.domain.domain
+
+    def _client_for(self, user):
+        client = APIClient()
+        client.force_authenticate(user=user)
+        return client
+
+    def test_nurse_records_vitals(self):
+        client = self._client_for(self.nurse_therapy)
+        response = client.post(
+            "/api/v1/vitals-records/",
+            {"admission": self.admission.pk, "blood_pressure_systolic": 120, "blood_pressure_diastolic": 80, "pulse": 72},
+            HTTP_HOST=self.host,
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["recorded_by"], self.nurse_therapy.pk)
+
+    def test_empty_measurement_rejected_via_api(self):
+        client = self._client_for(self.nurse_therapy)
+        response = client.post(
+            "/api/v1/vitals-records/", {"admission": self.admission.pk}, HTTP_HOST=self.host,
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_nurse_from_other_department_cannot_see_the_record(self):
+        VitalsRecord.objects.create(admission=self.admission, recorded_by=self.doctor, pulse=72)
+        client = self._client_for(self.nurse_surgery)
+        response = client.get("/api/v1/vitals-records/", HTTP_HOST=self.host)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 0)
+
+    def test_records_accumulate_not_overwrite(self):
+        """Append-only лист наблюдения — несколько замеров подряд должны
+        остаться отдельными записями, не "текущим значением"."""
+        client = self._client_for(self.nurse_therapy)
+        client.post(
+            "/api/v1/vitals-records/", {"admission": self.admission.pk, "pulse": 70}, HTTP_HOST=self.host,
+        )
+        client.post(
+            "/api/v1/vitals-records/", {"admission": self.admission.pk, "pulse": 75}, HTTP_HOST=self.host,
+        )
+        self.assertEqual(VitalsRecord.objects.filter(admission=self.admission).count(), 2)
+        response = client.get("/api/v1/vitals-records/", HTTP_HOST=self.host)
+        self.assertEqual(len(response.data), 2)
+
+    def test_no_update_or_delete_endpoint(self):
+        record = VitalsRecord.objects.create(admission=self.admission, recorded_by=self.doctor, pulse=72)
+        client = self._client_for(self.doctor)
+        patch = client.patch(
+            f"/api/v1/vitals-records/{record.pk}/", {"pulse": 999}, HTTP_HOST=self.host,
+        )
+        self.assertEqual(patch.status_code, 405)
+        delete = client.delete(f"/api/v1/vitals-records/{record.pk}/", HTTP_HOST=self.host)
+        self.assertEqual(delete.status_code, 405)

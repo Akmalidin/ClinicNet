@@ -1,6 +1,15 @@
 from django.contrib import admin
 
-from .models import Admission, Bed, ClinicalOrder, Department, Room, StaffDepartmentAssignment, Transfer
+from .models import (
+    Admission,
+    Bed,
+    ClinicalOrder,
+    Department,
+    Room,
+    StaffDepartmentAssignment,
+    Transfer,
+    VitalsRecord,
+)
 
 
 @admin.register(Department)
@@ -63,3 +72,20 @@ class ClinicalOrderAdmin(admin.ModelAdmin):
     list_filter = ("admission__department__branch", "order_type", "status")
     autocomplete_fields = ("admission", "ordered_by", "performed_by")
     date_hierarchy = "created_at"
+
+
+@admin.register(VitalsRecord)
+class VitalsRecordAdmin(admin.ModelAdmin):
+    list_display = (
+        "admission", "blood_pressure_systolic", "blood_pressure_diastolic",
+        "pulse", "temperature", "recorded_by", "recorded_at",
+    )
+    list_filter = ("admission__department__branch",)
+    autocomplete_fields = ("admission", "recorded_by")
+    date_hierarchy = "recorded_at"
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False

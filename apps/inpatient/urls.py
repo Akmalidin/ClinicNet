@@ -10,6 +10,7 @@ from .views import (
     RoomViewSet,
     StaffDepartmentAssignmentViewSet,
     TransferViewSet,
+    VitalsRecordViewSet,
 )
 
 router = DefaultRouter()
@@ -20,6 +21,7 @@ router.register("department-staff", StaffDepartmentAssignmentViewSet, basename="
 router.register("admissions", AdmissionViewSet, basename="admission")
 router.register("transfers", TransferViewSet, basename="transfer")
 router.register("clinical-orders", ClinicalOrderViewSet, basename="clinical-order")
+router.register("vitals-records", VitalsRecordViewSet, basename="vitals-record")
 
 urlpatterns = [
     path("", include(router.urls)),
