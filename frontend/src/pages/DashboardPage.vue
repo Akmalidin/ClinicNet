@@ -10,6 +10,7 @@ const auth = useAuthStore()
 const router = useRouter()
 
 const branches = ref([])
+const branchesError = ref('')
 const patients = ref([])
 const patientsError = ref('')
 
@@ -18,17 +19,37 @@ function logout() {
   router.push({ name: 'login' })
 }
 
-onMounted(async () => {
+// Fetched independently, not via one Promise.all: branch.view and
+// patient.view are separate RBAC grants (same class of bug as
+// PatientCardPage.vue's patient/visits split — audited the whole
+// frontend for this pattern while starting Phase 3, per the explicit
+// ask to check systemically rather than wait for it to resurface on a
+// new role). Every current role happens to hold both together, but
+// Phase 3's cashier role is exactly the kind of narrowly-scoped grant
+// that could hold one without the other.
+async function loadBranches() {
+  branchesError.value = ''
   try {
-    const [branchesRes, patientsRes] = await Promise.all([
-      branchesApi.list(),
-      patientsApi.list(),
-    ])
-    branches.value = branchesRes.data
-    patients.value = patientsRes.data.results ?? patientsRes.data
+    const { data } = await branchesApi.list()
+    branches.value = data
   } catch {
-    patientsError.value = 'Не удалось загрузить данные.'
+    branchesError.value = 'Филиалы недоступны (недостаточно прав или ошибка загрузки).'
   }
+}
+
+async function loadPatients() {
+  patientsError.value = ''
+  try {
+    const { data } = await patientsApi.list()
+    patients.value = data.results ?? data
+  } catch {
+    patientsError.value = 'Пациенты недоступны (недостаточно прав или ошибка загрузки).'
+  }
+}
+
+onMounted(() => {
+  loadBranches()
+  loadPatients()
 })
 </script>
 
@@ -46,7 +67,8 @@ onMounted(async () => {
     <main class="p-6 max-w-4xl mx-auto space-y-6">
       <section class="card p-4">
         <h2 class="text-sm font-medium text-gray-500 mb-2">Филиалы</h2>
-        <div class="flex flex-wrap gap-2">
+        <p v-if="branchesError" class="text-sm text-red-600">{{ branchesError }}</p>
+        <div v-else class="flex flex-wrap gap-2">
           <span v-for="branch in branches" :key="branch.id" class="badge-blue">
             {{ branch.name }}
           </span>
