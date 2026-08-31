@@ -286,3 +286,106 @@ class Transfer(models.Model):
         a nurse who was in the FROM department still sees the historic
         record of a patient who left it."""
         return self.to_department
+
+
+class ClinicalOrderType(models.TextChoices):
+    MEDICATION = "medication", "Медикамент"
+    PROCEDURE = "procedure", "Процедура"
+    DIET = "diet", "Диета"
+
+
+class ClinicalOrderStatus(models.TextChoices):
+    ORDERED = "ordered", "Назначено"
+    COMPLETED = "completed", "Выполнено"
+    CANCELLED = "cancelled", "Отменено"
+
+
+# Тот же паттерн, что apps.referrals.models.TERMINAL_STATUSES/
+# apps.diagnostics.models.LabOrderStatus's TERMINAL_STATUSES.
+CLINICAL_ORDER_TERMINAL_STATUSES = (ClinicalOrderStatus.COMPLETED, ClinicalOrderStatus.CANCELLED)
+
+
+class ClinicalOrder(models.Model):
+    """Назначение — медикамент/процедура/диета. Свободный текст в
+    description (не отдельный каталог препаратов/процедур), тот же
+    выбор, что уже сделан для Visit.reason/LabOrder.test_type в этом
+    проекте — вводить справочник не нужно для той функциональности,
+    которую просит фаза.
+
+    Разделение назначил/выполнил — реальный рабочий процесс стационара:
+    врач назначает (ordered_by, inpatient.order.manage), постовая
+    медсестра выполняет (performed_by, inpatient.order.perform) — это
+    ДВА разных права, не одно "manage" на всё (см. seed_rbac.py и
+    ClinicalOrderViewSet.complete's required_permission override).
+    """
+
+    admission = models.ForeignKey(Admission, on_delete=models.PROTECT, related_name="orders")
+    order_type = models.CharField(max_length=20, choices=ClinicalOrderType.choices)
+    description = models.CharField(max_length=255, verbose_name="Назначение")
+    scheduled_for = models.DateTimeField(
+        null=True, blank=True, help_text="Когда должно быть выполнено — необязательно."
+    )
+    ordered_by = models.ForeignKey(
+        "accounts.User", on_delete=models.PROTECT, related_name="clinical_orders_placed"
+    )
+    status = models.CharField(
+        max_length=20, choices=ClinicalOrderStatus.choices, default=ClinicalOrderStatus.ORDERED
+    )
+    performed_by = models.ForeignKey(
+        "accounts.User", on_delete=models.PROTECT, null=True, blank=True,
+        related_name="clinical_orders_performed",
+    )
+    performed_at = models.DateTimeField(null=True, blank=True)
+    performed_note = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["admission", "status"])]
+
+    def __str__(self):
+        return f"{self.get_order_type_display()}: {self.description} ({self.get_status_display()})"
+
+    @property
+    def department(self):
+        return self.admission.department
+
+    def clean(self):
+        if self.pk:
+            original_status = (
+                ClinicalOrder.objects.filter(pk=self.pk).values_list("status", flat=True).first()
+            )
+            if original_status in CLINICAL_ORDER_TERMINAL_STATUSES and original_status != self.status:
+                raise ValidationError(
+                    "Назначение уже закрыто (%s) — статус больше нельзя менять."
+                    % ClinicalOrderStatus(original_status).label
+                )
+        else:
+            # Только на создание — новое назначение не заводится для уже
+            # выписанного пациента. Выполнить/отменить уже существующее
+            # назначение можно и после выписки (не блокируем задним числом).
+            if self.admission_id and self.admission.status != AdmissionStatus.ACTIVE:
+                raise ValidationError("Нельзя назначить новую позицию для завершённой госпитализации.")
+
+    def complete(self, performed_by, note: str = "") -> bool:
+        """ORDERED -> COMPLETED. No-op-safe (returns False on a retried
+        request) — same "повторное выполнение уже выполненного назначения
+        должно быть отклонено" requirement as LabOrder's result/ guard."""
+        if self.status in CLINICAL_ORDER_TERMINAL_STATUSES:
+            return False
+        self.status = ClinicalOrderStatus.COMPLETED
+        self.performed_by = performed_by
+        self.performed_at = timezone.now()
+        if note:
+            self.performed_note = note
+        self.full_clean()
+        self.save(update_fields=["status", "performed_by", "performed_at", "performed_note", "updated_at"])
+        return True
+
+    def cancel(self) -> bool:
+        if self.status in CLINICAL_ORDER_TERMINAL_STATUSES:
+            return False
+        self.status = ClinicalOrderStatus.CANCELLED
+        self.save(update_fields=["status", "updated_at"])
+        return True

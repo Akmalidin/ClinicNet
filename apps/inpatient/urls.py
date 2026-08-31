@@ -5,6 +5,7 @@ from django.urls import include, path
 from .views import (
     AdmissionViewSet,
     BedViewSet,
+    ClinicalOrderViewSet,
     DepartmentViewSet,
     RoomViewSet,
     StaffDepartmentAssignmentViewSet,
@@ -18,6 +19,7 @@ router.register("beds", BedViewSet, basename="bed")
 router.register("department-staff", StaffDepartmentAssignmentViewSet, basename="department-staff")
 router.register("admissions", AdmissionViewSet, basename="admission")
 router.register("transfers", TransferViewSet, basename="transfer")
+router.register("clinical-orders", ClinicalOrderViewSet, basename="clinical-order")
 
 urlpatterns = [
     path("", include(router.urls)),

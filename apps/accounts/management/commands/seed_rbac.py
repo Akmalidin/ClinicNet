@@ -35,6 +35,9 @@ PERMISSIONS = [
     ("inpatient.department.manage", "inpatient", "Создание/редактирование отделений, палат и коек"),
     ("inpatient.admission.view", "inpatient", "Просмотр госпитализаций своего отделения/филиала"),
     ("inpatient.admission.manage", "inpatient", "Госпитализация, выписка своего отделения/филиала"),
+    ("inpatient.order.view", "inpatient", "Просмотр назначений своего отделения/филиала"),
+    ("inpatient.order.manage", "inpatient", "Назначение/отмена назначения (медикамент/процедура/диета)"),
+    ("inpatient.order.perform", "inpatient", "Отметка о выполнении назначения (постовая медсестра)"),
 ]
 
 # codename -> (name, is_system, branch-agnostic description, permission codes)
@@ -93,6 +96,9 @@ ROLES = {
             # здесь не сужается по отделениям — см. apps.inpatient.rbac.
             "inpatient.admission.view",
             "inpatient.admission.manage",
+            "inpatient.order.view",
+            "inpatient.order.manage",
+            "inpatient.order.perform",
         ],
     },
     "doctor": {
@@ -122,6 +128,13 @@ ROLES = {
             "inpatient.department.view",
             "inpatient.admission.view",
             "inpatient.admission.manage",
+            # Врач и назначает (order.manage), и может отметить
+            # выполнение сам (order.perform) — реальный процесс
+            # стационара: врач-хирург, к примеру, часто сам выполняет
+            # назначенную им же процедуру.
+            "inpatient.order.view",
+            "inpatient.order.manage",
+            "inpatient.order.perform",
             # referrals.view/manage НЕ выдаются врачу намеренно: это права
             # координатора/сети на очередь ЦЕЛОГО филиала (own_branch-scope
             # тут означало бы "видит весь список направлений своего
@@ -174,6 +187,9 @@ ROLES = {
             "inpatient.department.view",
             "inpatient.admission.view",
             "inpatient.admission.manage",
+            "inpatient.order.view",
+            "inpatient.order.manage",
+            "inpatient.order.perform",
         ],
         # Department-scoped, NOT branch-scoped: provision this role's
         # UserRole with branch_scope=SPECIFIC_BRANCHES and NO branches
@@ -190,14 +206,17 @@ ROLES = {
             "branch.view",
             "patient.view",
             "inpatient.admission.view",
+            "inpatient.order.view",
+            # Выполняет назначения врача, сама не назначает — order.manage
+            # (создание/отмена) НЕ выдаётся намеренно, только order.perform.
+            "inpatient.order.perform",
         ],
         # Same department-scoped provisioning note as "department-head"
         # above — SPECIFIC_BRANCHES with no branches, real reach comes
         # from StaffDepartmentAssignment. inpatient.admission.manage
         # (admit/discharge) is deliberately NOT granted — that's a
-        # doctor/department-head decision; a nurse's own actions
-        # (назначения/лист наблюдения) land here in later steps of
-        # Фаза 4 (ClinicalOrder execution, VitalsRecord).
+        # doctor/department-head decision; лист наблюдения (VitalsRecord)
+        # придёт в следующем шаге Фазы 4.
     },
 }
 
