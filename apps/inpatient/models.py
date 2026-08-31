@@ -389,3 +389,61 @@ class ClinicalOrder(models.Model):
         self.status = ClinicalOrderStatus.CANCELLED
         self.save(update_fields=["status", "updated_at"])
         return True
+
+
+class VitalsRecord(models.Model):
+    """Лист наблюдения — append-only, тот же принцип, что Payment/
+    StockMovement/Transfer: один замер — одна неизменяемая запись,
+    ошибочный замер компенсируется НОВОЙ записью, а не правкой старой
+    (та же логика, что делает возможным разобраться "почему касса не
+    сходится" для денег — здесь "что реально показывал монитор в 09:00",
+    не отредактированная задним числом история). "Текущие" показатели —
+    последняя по recorded_at запись, не отдельно хранимое поле.
+
+    Никакого update/delete в API вообще (VitalsRecordViewSet — только
+    create/list/retrieve) — не "read-only после создания одним action'ом"
+    как Payment/StockMovement/Transfer (у тех создание — побочный эффект
+    другого действия), а "создаётся напрямую, но неизменяемо после" —
+    ближайший в проекте аналог это LabResult (тоже вводится один раз и
+    не редактируется), только без OneToOne-ограничения: замеров за
+    госпитализацию много.
+    """
+
+    admission = models.ForeignKey(Admission, on_delete=models.PROTECT, related_name="vitals_records")
+    recorded_by = models.ForeignKey(
+        "accounts.User", on_delete=models.PROTECT, related_name="vitals_records_made"
+    )
+    blood_pressure_systolic = models.PositiveSmallIntegerField(
+        null=True, blank=True, verbose_name="АД систолическое"
+    )
+    blood_pressure_diastolic = models.PositiveSmallIntegerField(
+        null=True, blank=True, verbose_name="АД диастолическое"
+    )
+    pulse = models.PositiveSmallIntegerField(null=True, blank=True, verbose_name="Пульс")
+    temperature = models.DecimalField(
+        max_digits=4, decimal_places=1, null=True, blank=True, verbose_name="Температура"
+    )
+    note = models.CharField(max_length=255, blank=True)
+    recorded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-recorded_at"]
+        indexes = [models.Index(fields=["admission", "-recorded_at"])]
+
+    def __str__(self):
+        return f"{self.admission} @ {self.recorded_at:%Y-%m-%d %H:%M}"
+
+    @property
+    def department(self):
+        return self.admission.department
+
+    def clean(self):
+        if not any([
+            self.blood_pressure_systolic is not None,
+            self.blood_pressure_diastolic is not None,
+            self.pulse is not None,
+            self.temperature is not None,
+        ]):
+            raise ValidationError("Нужно указать хотя бы один показатель.")
+        if self.admission_id and self.admission.status != AdmissionStatus.ACTIVE:
+            raise ValidationError("Нельзя добавить замер для завершённой госпитализации.")

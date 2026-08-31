@@ -38,6 +38,8 @@ PERMISSIONS = [
     ("inpatient.order.view", "inpatient", "Просмотр назначений своего отделения/филиала"),
     ("inpatient.order.manage", "inpatient", "Назначение/отмена назначения (медикамент/процедура/диета)"),
     ("inpatient.order.perform", "inpatient", "Отметка о выполнении назначения (постовая медсестра)"),
+    ("inpatient.vitals.view", "inpatient", "Просмотр листа наблюдения своего отделения/филиала"),
+    ("inpatient.vitals.manage", "inpatient", "Добавление замера в лист наблюдения"),
 ]
 
 # codename -> (name, is_system, branch-agnostic description, permission codes)
@@ -99,6 +101,8 @@ ROLES = {
             "inpatient.order.view",
             "inpatient.order.manage",
             "inpatient.order.perform",
+            "inpatient.vitals.view",
+            "inpatient.vitals.manage",
         ],
     },
     "doctor": {
@@ -135,6 +139,8 @@ ROLES = {
             "inpatient.order.view",
             "inpatient.order.manage",
             "inpatient.order.perform",
+            "inpatient.vitals.view",
+            "inpatient.vitals.manage",
             # referrals.view/manage НЕ выдаются врачу намеренно: это права
             # координатора/сети на очередь ЦЕЛОГО филиала (own_branch-scope
             # тут означало бы "видит весь список направлений своего
@@ -190,6 +196,8 @@ ROLES = {
             "inpatient.order.view",
             "inpatient.order.manage",
             "inpatient.order.perform",
+            "inpatient.vitals.view",
+            "inpatient.vitals.manage",
         ],
         # Department-scoped, NOT branch-scoped: provision this role's
         # UserRole with branch_scope=SPECIFIC_BRANCHES and NO branches
@@ -210,13 +218,18 @@ ROLES = {
             # Выполняет назначения врача, сама не назначает — order.manage
             # (создание/отмена) НЕ выдаётся намеренно, только order.perform.
             "inpatient.order.perform",
+            # Лист наблюдения — рутинная работа постового поста, отсюда
+            # оба права сразу (в отличие от order.*, где нет симметрии
+            # "назначил/выполнил" — замер один и тот же человек и вносит,
+            # и видит).
+            "inpatient.vitals.view",
+            "inpatient.vitals.manage",
         ],
         # Same department-scoped provisioning note as "department-head"
         # above — SPECIFIC_BRANCHES with no branches, real reach comes
         # from StaffDepartmentAssignment. inpatient.admission.manage
         # (admit/discharge) is deliberately NOT granted — that's a
-        # doctor/department-head decision; лист наблюдения (VitalsRecord)
-        # придёт в следующем шаге Фазы 4.
+        # doctor/department-head decision.
     },
 }
 

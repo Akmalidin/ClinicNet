@@ -1,5 +1,6 @@
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db.models import Q
+from rest_framework import mixins
 from rest_framework import serializers as drf_serializers
 from rest_framework import viewsets
 from rest_framework.decorators import action
@@ -21,6 +22,7 @@ from .models import (
     Room,
     StaffDepartmentAssignment,
     Transfer,
+    VitalsRecord,
 )
 from .permissions import HasDepartmentPermission
 from .rbac import departments_for_permission
@@ -32,6 +34,7 @@ from .serializers import (
     RoomSerializer,
     StaffDepartmentAssignmentSerializer,
     TransferSerializer,
+    VitalsRecordSerializer,
 )
 from .services import admit_patient, discharge_admission, transfer_admission
 
@@ -331,3 +334,30 @@ class ClinicalOrderViewSet(viewsets.ModelViewSet):
         if not order.cancel():
             return Response({"detail": "Назначение уже закрыто и не может быть изменено."}, status=400)
         return Response(self.get_serializer(order).data)
+
+
+class VitalsRecordViewSet(
+    mixins.CreateModelMixin, mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet
+):
+    """Лист наблюдения — create/list/retrieve only, no update/destroy at
+    all (see VitalsRecord's model docstring: created directly via POST,
+    unlike Payment/StockMovement/Transfer whose creation is a side effect
+    of another action, but just as immutable afterwards)."""
+
+    serializer_class = VitalsRecordSerializer
+    permission_classes = [HasDepartmentPermission]
+    required_permission = {
+        "GET": "inpatient.vitals.view",
+        "POST": "inpatient.vitals.manage",
+    }
+    filterset_fields = ["admission"]
+
+    def get_queryset(self):
+        code = self.required_permission.get(self.request.method, "inpatient.vitals.view")
+        allowed_departments = departments_for_permission(self.request.user, code)
+        return VitalsRecord.objects.filter(admission__department__in=allowed_departments).select_related(
+            "admission", "admission__department", "recorded_by"
+        )
+
+    def perform_create(self, serializer):
+        serializer.save(recorded_by=self.request.user)

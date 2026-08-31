@@ -1,7 +1,16 @@
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
-from .models import Admission, Bed, ClinicalOrder, Department, Room, StaffDepartmentAssignment, Transfer
+from .models import (
+    Admission,
+    Bed,
+    ClinicalOrder,
+    Department,
+    Room,
+    StaffDepartmentAssignment,
+    Transfer,
+    VitalsRecord,
+)
 
 
 class DepartmentSerializer(serializers.ModelSerializer):
@@ -178,6 +187,38 @@ class ClinicalOrderSerializer(serializers.ModelSerializer):
                 description=attrs.get("description"),
                 scheduled_for=attrs.get("scheduled_for"),
             )
+        try:
+            instance.clean()
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(
+                exc.message_dict if hasattr(exc, "message_dict") else exc.messages
+            )
+        return attrs
+
+
+class VitalsRecordSerializer(serializers.ModelSerializer):
+    recorded_by_name = serializers.CharField(source="recorded_by.__str__", read_only=True)
+
+    class Meta:
+        model = VitalsRecord
+        fields = (
+            "id", "admission", "recorded_by", "recorded_by_name",
+            "blood_pressure_systolic", "blood_pressure_diastolic", "pulse", "temperature",
+            "note", "recorded_at",
+        )
+        # Append-only — VitalsRecordViewSet has no update/destroy at all
+        # (see the model's docstring), so recorded_by/recorded_at are the
+        # only genuinely server-set fields; nothing here is ever PATCHed.
+        read_only_fields = ("id", "recorded_by", "recorded_at")
+
+    def validate(self, attrs):
+        instance = VitalsRecord(
+            admission=attrs.get("admission"),
+            blood_pressure_systolic=attrs.get("blood_pressure_systolic"),
+            blood_pressure_diastolic=attrs.get("blood_pressure_diastolic"),
+            pulse=attrs.get("pulse"),
+            temperature=attrs.get("temperature"),
+        )
         try:
             instance.clean()
         except DjangoValidationError as exc:
