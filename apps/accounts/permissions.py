@@ -78,3 +78,31 @@ class HasPermission(BasePermission):
         if not code:
             return bool(request.user and request.user.is_authenticated)
         return has_any_permission(request.user, code)
+
+
+class HasNetworkWidePermission(BasePermission):
+    """Requires an ALL-scope grant specifically — `has_any_permission`
+    isn't enough here, an own_branch/specific_branches grant must not
+    pass, because there's no branch for that scoping to apply *to*.
+
+    For a genuinely network-wide resource with no branch of its own at
+    all (e.g. the Service price catalog, apps.finance.models.Service —
+    every branch's price for a service is a separate BranchPriceOverride,
+    but the catalog entry itself — its name, its base_price — belongs to
+    no single branch, so editing it isn't something an own_branch grant
+    should be able to do). `has_permission(user, code, branch=None)`
+    already encodes exactly this rule (see rbac.has_permission's own
+    docstring): only ALL-scope grants satisfy a branch=None check.
+    """
+
+    def _required_code(self, request, view):
+        required = getattr(view, "required_permission", None)
+        if isinstance(required, dict):
+            return required.get(request.method)
+        return required
+
+    def has_permission(self, request, view):
+        code = self._required_code(request, view)
+        if not code:
+            return bool(request.user and request.user.is_authenticated)
+        return has_permission(request.user, code, branch=None)

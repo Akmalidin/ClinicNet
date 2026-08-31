@@ -1,14 +1,36 @@
 from rest_framework import serializers
 
-from .models import Invoice, InvoiceLine, Payment
+from .models import BranchPriceOverride, Invoice, InvoiceLine, Payment, Service
+
+
+class BranchPriceOverrideSerializer(serializers.ModelSerializer):
+    branch_name = serializers.CharField(source="branch.name", read_only=True)
+
+    class Meta:
+        model = BranchPriceOverride
+        fields = ("id", "service", "branch", "branch_name", "price", "created_at", "updated_at")
+        read_only_fields = ("id", "created_at", "updated_at")
+
+
+class ServiceSerializer(serializers.ModelSerializer):
+    branch_overrides = BranchPriceOverrideSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = Service
+        fields = ("id", "name", "code", "base_price", "is_active", "branch_overrides", "created_at", "updated_at")
+        read_only_fields = ("id", "created_at", "updated_at")
 
 
 class InvoiceLineSerializer(serializers.ModelSerializer):
     line_total = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    service_name = serializers.CharField(source="service.name", read_only=True, default=None)
 
     class Meta:
         model = InvoiceLine
-        fields = ("id", "description", "quantity", "unit_price", "line_total", "created_at")
+        fields = (
+            "id", "service", "service_name", "description", "quantity", "unit_price",
+            "line_total", "created_at",
+        )
         read_only_fields = ("id", "created_at")
 
 

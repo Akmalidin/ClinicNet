@@ -23,6 +23,8 @@ PERMISSIONS = [
     ("diagnostics.manage", "diagnostics", "Заказ анализа, ввод результата, отмена заказа"),
     ("finance.view", "finance", "Просмотр счетов, платежей и отчёта по кассе"),
     ("finance.manage", "finance", "Выставление счетов, приём платежей и возвраты"),
+    ("pricing.manage", "finance", "Управление сетевым прайс-листом (каталог услуг)"),
+    ("pricing.override", "finance", "Переопределение цены услуги для своего филиала"),
 ]
 
 # codename -> (name, is_system, branch-agnostic description, permission codes)
@@ -51,6 +53,13 @@ ROLES = {
             "diagnostics.manage",
             "finance.view",
             "finance.manage",
+            # pricing.manage (the network-wide Service catalog) NOT granted
+            # here even though branch-admin holds most other .manage codes
+            # — it requires an ALL-scope grant specifically (see
+            # HasNetworkWidePermission), which UserRole assignment, not
+            # this role definition, controls. pricing.override (their own
+            # branch's price exceptions) is the branch-level equivalent.
+            "pricing.override",
         ],
     },
     "doctor": {
