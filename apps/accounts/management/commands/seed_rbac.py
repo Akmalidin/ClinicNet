@@ -28,6 +28,9 @@ PERMISSIONS = [
     ("insurance.manage", "finance", "Управление каталогом страховых компаний"),
     ("insurance.view", "finance", "Просмотр полисов пациентов"),
     ("insurance.policy.manage", "finance", "Создание/редактирование полисов пациентов"),
+    ("inventory.manage", "inventory", "Управление сетевым каталогом расходников"),
+    ("inventory.view", "inventory", "Просмотр остатков и движений склада филиала"),
+    ("inventory.stock.manage", "inventory", "Приход/списание/корректировка остатков филиала"),
 ]
 
 # codename -> (name, is_system, branch-agnostic description, permission codes)
@@ -65,6 +68,13 @@ ROLES = {
             "pricing.override",
             "insurance.view",
             "insurance.policy.manage",
+            # inventory.manage (the network-wide Product catalog) NOT
+            # granted here, same reasoning as pricing.manage above —
+            # requires an ALL-scope grant specifically. inventory.stock.manage
+            # (their own branch's stock — restock/adjust) is the
+            # branch-level equivalent, same shape as pricing.override.
+            "inventory.view",
+            "inventory.stock.manage",
         ],
     },
     "doctor": {
@@ -80,6 +90,12 @@ ROLES = {
             "visit.manage",
             "diagnostics.view",
             "diagnostics.manage",
+            # Read-only — checking "do we have enough anesthetic" before
+            # closing a visit with consumed_items. Doesn't need
+            # inventory.stock.manage: consuming stock at visit-close time
+            # flows from visit.manage (already theirs), not a separate
+            # inventory grant — see VisitViewSet.close().
+            "inventory.view",
             # referrals.view/manage НЕ выдаются врачу намеренно: это права
             # координатора/сети на очередь ЦЕЛОГО филиала (own_branch-scope
             # тут означало бы "видит весь список направлений своего
