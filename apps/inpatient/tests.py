@@ -1,4 +1,4 @@
-from datetime import time
+from datetime import datetime, time, timezone as dt_timezone
 
 from django.core.exceptions import ValidationError
 from django_tenants.test.cases import TenantTestCase
@@ -17,6 +17,9 @@ from .models import (
     ClinicalOrderStatus,
     ClinicalOrderType,
     Department,
+    Operation,
+    OperatingRoom,
+    OperationStatus,
     Room,
     StaffDepartmentAssignment,
     Transfer,
@@ -905,3 +908,228 @@ class VitalsRecordAPIRBACTests(TenantTestCase):
         self.assertEqual(patch.status_code, 405)
         delete = client.delete(f"/api/v1/vitals-records/{record.pk}/", HTTP_HOST=self.host)
         self.assertEqual(delete.status_code, 405)
+
+
+def _dt(hour, minute=0, day=1):
+    return datetime(2030, 1, day, hour, minute, tzinfo=dt_timezone.utc)
+
+
+class OperationModelTests(TenantTestCase):
+    """Чек-лист безопасности хирургии — отдельно проработанная часть
+    шага (f): три строго последовательные фазы, и Operation.complete()
+    физически не даст завершить операцию без подтверждённого Sign Out."""
+
+    def setUp(self):
+        self.branch = Branch.objects.create(name="Филиал А", code="a")
+        self.department = Department.objects.create(branch=self.branch, name="Хирургия", code="surgery")
+        self.room = Room.objects.create(department=self.department, name="301")
+        self.bed = Bed.objects.create(room=self.room, label="1")
+        self.operating_room = OperatingRoom.objects.create(branch=self.branch, name="Операционная 1")
+        self.surgeon = User.objects.create(username="surgeon")
+        self.nurse = User.objects.create(username="or_nurse")
+        self.patient = Patient.objects.create(first_name="Тест", last_name="Пациентов")
+        self.admission = admit_patient(
+            patient=self.patient, department=self.department, bed=self.bed,
+            attending_doctor=self.surgeon, admitted_by=self.surgeon, diagnosis_at_admission="Аппендицит",
+        )
+
+    def _operation(self, **overrides):
+        kwargs = dict(
+            admission=self.admission, operating_room=self.operating_room,
+            procedure_name="Аппендэктомия", starts_at=_dt(9), ends_at=_dt(11),
+            lead_surgeon=self.surgeon,
+        )
+        kwargs.update(overrides)
+        op = Operation(**kwargs)
+        op.full_clean()
+        op.save()
+        return op
+
+    def test_overlapping_operating_room_booking_rejected(self):
+        self._operation()
+        clashing = Operation(
+            admission=self.admission, operating_room=self.operating_room,
+            procedure_name="Другая операция", starts_at=_dt(10), ends_at=_dt(12),
+            lead_surgeon=self.surgeon,
+        )
+        with self.assertRaises(ValidationError):
+            clashing.full_clean()
+
+    def test_non_overlapping_bookings_are_fine(self):
+        self._operation()
+        later = Operation(
+            admission=self.admission, operating_room=self.operating_room,
+            procedure_name="Другая операция", starts_at=_dt(11), ends_at=_dt(13),
+            lead_surgeon=self.surgeon,
+        )
+        later.full_clean()  # does not raise — back-to-back, no overlap
+
+    def test_cancelled_operation_does_not_block_the_slot(self):
+        op = self._operation()
+        op.cancel()
+        clashing = Operation(
+            admission=self.admission, operating_room=self.operating_room,
+            procedure_name="Другая операция", starts_at=_dt(9), ends_at=_dt(11),
+            lead_surgeon=self.surgeon,
+        )
+        clashing.full_clean()  # does not raise — the slot was freed by cancel()
+
+    def test_cannot_complete_without_full_checklist(self):
+        op = self._operation()
+        with self.assertRaises(ValidationError):
+            op.complete()
+
+    def test_cannot_complete_with_only_sign_in_and_time_out(self):
+        op = self._operation()
+        op.confirm_sign_in(self.surgeon)
+        op.confirm_time_out(self.surgeon)
+        with self.assertRaises(ValidationError):
+            op.complete()
+
+    def test_full_checklist_then_complete_succeeds(self):
+        op = self._operation()
+        op.confirm_sign_in(self.surgeon)
+        op.confirm_time_out(self.surgeon)
+        op.confirm_sign_out(self.nurse)
+        self.assertTrue(op.complete())
+        self.assertEqual(op.status, OperationStatus.COMPLETED)
+
+    def test_time_out_before_sign_in_rejected(self):
+        op = self._operation()
+        with self.assertRaises(ValidationError):
+            op.confirm_time_out(self.surgeon)
+
+    def test_sign_out_before_time_out_rejected(self):
+        op = self._operation()
+        op.confirm_sign_in(self.surgeon)
+        with self.assertRaises(ValidationError):
+            op.confirm_sign_out(self.surgeon)
+
+    def test_repeated_sign_in_is_a_no_op(self):
+        op = self._operation()
+        self.assertTrue(op.confirm_sign_in(self.surgeon))
+        self.assertFalse(op.confirm_sign_in(self.nurse))
+        self.assertEqual(op.sign_in_confirmed_by, self.surgeon)  # not overwritten by the second call
+
+    def test_closed_operation_is_fully_immutable(self):
+        op = self._operation()
+        op.cancel()
+        op.procedure_name = "Изменено задним числом"
+        with self.assertRaises(ValidationError):
+            op.full_clean()
+
+
+class OperationAPIRBACTests(TenantTestCase):
+    def setUp(self):
+        self.branch = Branch.objects.create(name="Филиал А", code="a")
+        self.department = Department.objects.create(branch=self.branch, name="Хирургия", code="surgery")
+        self.room = Room.objects.create(department=self.department, name="301")
+        self.bed = Bed.objects.create(room=self.room, label="1")
+        self.operating_room = OperatingRoom.objects.create(branch=self.branch, name="Операционная 1")
+        self.patient = Patient.objects.create(first_name="Тест", last_name="Пациентов")
+
+        view_perm = Permission.objects.create(code="inpatient.operation.view", category="inpatient")
+        manage_perm = Permission.objects.create(code="inpatient.operation.manage", category="inpatient")
+        checklist_perm = Permission.objects.create(code="inpatient.operation.checklist", category="inpatient")
+        admission_manage_perm = Permission.objects.create(code="inpatient.admission.manage", category="inpatient")
+
+        doctor_role = Role.objects.create(name="Врач", codename="doctor")
+        for perm in (view_perm, manage_perm, checklist_perm, admission_manage_perm):
+            RolePermission.objects.create(role=doctor_role, permission=perm)
+
+        nurse_role = Role.objects.create(name="Операционная медсестра", codename="nurse")
+        RolePermission.objects.create(role=nurse_role, permission=view_perm)
+        RolePermission.objects.create(role=nurse_role, permission=checklist_perm)
+        # Deliberately NOT granted manage — nurse confirms checklist steps, doesn't schedule/cancel.
+
+        self.surgeon = User.objects.create(username="surgeon")
+        UserRole.objects.create(user=self.surgeon, role=doctor_role, branch_scope=BranchScope.OWN_BRANCH)
+        StaffBranchAssignment.objects.create(
+            staff=self.surgeon, branch=self.branch, weekday=Weekday.MONDAY,
+            start_time=time(9, 0), end_time=time(18, 0),
+        )
+
+        self.nurse = User.objects.create(username="or_nurse")
+        UserRole.objects.create(user=self.nurse, role=nurse_role, branch_scope=BranchScope.SPECIFIC_BRANCHES)
+        StaffDepartmentAssignment.objects.create(staff=self.nurse, department=self.department)
+
+        self.admission = admit_patient(
+            patient=self.patient, department=self.department, bed=self.bed,
+            attending_doctor=self.surgeon, admitted_by=self.surgeon, diagnosis_at_admission="Аппендицит",
+        )
+        self.host = self.domain.domain
+
+    def _client_for(self, user):
+        client = APIClient()
+        client.force_authenticate(user=user)
+        return client
+
+    def _payload(self, **overrides):
+        payload = {
+            "admission": self.admission.pk, "operating_room": self.operating_room.pk,
+            "procedure_name": "Аппендэктомия",
+            "starts_at": _dt(9).isoformat(), "ends_at": _dt(11).isoformat(),
+            "lead_surgeon": self.surgeon.pk,
+        }
+        payload.update(overrides)
+        return payload
+
+    def test_doctor_schedules_operation(self):
+        client = self._client_for(self.surgeon)
+        response = client.post("/api/v1/operations/", self._payload(), HTTP_HOST=self.host)
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["status"], OperationStatus.SCHEDULED)
+
+    def test_nurse_cannot_schedule_operation(self):
+        client = self._client_for(self.nurse)
+        response = client.post("/api/v1/operations/", self._payload(), HTTP_HOST=self.host)
+        self.assertEqual(response.status_code, 403)
+
+    def test_double_booking_operating_room_via_api_rejected(self):
+        client = self._client_for(self.surgeon)
+        first = client.post("/api/v1/operations/", self._payload(), HTTP_HOST=self.host)
+        self.assertEqual(first.status_code, 201, first.data)
+        second = client.post(
+            "/api/v1/operations/",
+            self._payload(starts_at=_dt(10).isoformat(), ends_at=_dt(12).isoformat()),
+            HTTP_HOST=self.host,
+        )
+        self.assertEqual(second.status_code, 400)
+
+    def test_full_checklist_flow_then_complete(self):
+        client_doctor = self._client_for(self.surgeon)
+        create = client_doctor.post("/api/v1/operations/", self._payload(), HTTP_HOST=self.host)
+        op_id = create.data["id"]
+
+        client_nurse = self._client_for(self.nurse)
+        sign_in = client_nurse.post(f"/api/v1/operations/{op_id}/sign_in/", {}, HTTP_HOST=self.host)
+        self.assertEqual(sign_in.status_code, 200, sign_in.data)
+
+        time_out = client_nurse.post(f"/api/v1/operations/{op_id}/time_out/", {}, HTTP_HOST=self.host)
+        self.assertEqual(time_out.status_code, 200, time_out.data)
+
+        sign_out = client_nurse.post(f"/api/v1/operations/{op_id}/sign_out/", {}, HTTP_HOST=self.host)
+        self.assertEqual(sign_out.status_code, 200, sign_out.data)
+
+        complete = client_doctor.post(f"/api/v1/operations/{op_id}/complete/", {}, HTTP_HOST=self.host)
+        self.assertEqual(complete.status_code, 200, complete.data)
+        self.assertEqual(complete.data["status"], OperationStatus.COMPLETED)
+
+    def test_complete_without_checklist_rejected_via_api(self):
+        client = self._client_for(self.surgeon)
+        create = client.post("/api/v1/operations/", self._payload(), HTTP_HOST=self.host)
+        op_id = create.data["id"]
+        response = client.post(f"/api/v1/operations/{op_id}/complete/", {}, HTTP_HOST=self.host)
+        self.assertEqual(response.status_code, 400)
+
+    def test_nurse_cannot_schedule_but_can_confirm_checklist(self):
+        client_doctor = self._client_for(self.surgeon)
+        create = client_doctor.post("/api/v1/operations/", self._payload(), HTTP_HOST=self.host)
+        op_id = create.data["id"]
+
+        client_nurse = self._client_for(self.nurse)
+        response = client_nurse.post(f"/api/v1/operations/{op_id}/sign_in/", {}, HTTP_HOST=self.host)
+        self.assertEqual(response.status_code, 200, response.data)
+        # But cancelling the operation itself is still off-limits (manage-only).
+        cancel = client_nurse.post(f"/api/v1/operations/{op_id}/cancel/", {}, HTTP_HOST=self.host)
+        self.assertEqual(cancel.status_code, 403)

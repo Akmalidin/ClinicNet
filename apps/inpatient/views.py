@@ -19,6 +19,9 @@ from .models import (
     ClinicalOrder,
     ClinicalOrderStatus,
     Department,
+    Operation,
+    OperatingRoom,
+    OperationStatus,
     Room,
     StaffDepartmentAssignment,
     Transfer,
@@ -31,6 +34,8 @@ from .serializers import (
     BedSerializer,
     ClinicalOrderSerializer,
     DepartmentSerializer,
+    OperatingRoomSerializer,
+    OperationSerializer,
     RoomSerializer,
     StaffDepartmentAssignmentSerializer,
     TransferSerializer,
@@ -361,3 +366,96 @@ class VitalsRecordViewSet(
 
     def perform_create(self, serializer):
         serializer.save(recorded_by=self.request.user)
+
+
+class OperatingRoomViewSet(viewsets.ModelViewSet):
+    """Каталог операционных филиала — тот же уровень, что структура
+    Room/Bed (см. OperatingRoom's docstring), поэтому HasBranchPermission/
+    inpatient.department.* , не отдельный department-scoped код."""
+
+    serializer_class = OperatingRoomSerializer
+    permission_classes = [HasBranchPermission]
+    required_permission = {
+        "GET": "inpatient.department.view",
+        "POST": "inpatient.department.manage",
+        "PUT": "inpatient.department.manage",
+        "PATCH": "inpatient.department.manage",
+        "DELETE": "inpatient.department.manage",
+    }
+    filterset_fields = ["branch", "is_active"]
+
+    def get_queryset(self):
+        code = self.required_permission.get(self.request.method, "inpatient.department.view")
+        allowed_branches = branches_for_permission(self.request.user, code)
+        return OperatingRoom.objects.filter(branch__in=allowed_branches).select_related("branch")
+
+
+class OperationViewSet(viewsets.ModelViewSet):
+    """Операционный модуль — department-scoped через Admission (см.
+    Operation.department). Чек-лист безопасности (sign_in/time_out/
+    sign_out) — отдельные action'ы под inpatient.operation.checklist:
+    хирург/анестезиолог/операционная медсестра могут подтверждать этапы,
+    не обязательно тот, кто планировал операцию (inpatient.operation.
+    manage) — та же логика разделения "назначил/выполнил", что у
+    ClinicalOrder.
+    """
+
+    serializer_class = OperationSerializer
+    permission_classes = [HasDepartmentPermission]
+    required_permission = {
+        "GET": "inpatient.operation.view",
+        "POST": "inpatient.operation.manage",
+        "PUT": "inpatient.operation.manage",
+        "PATCH": "inpatient.operation.manage",
+        "DELETE": "inpatient.operation.manage",
+    }
+    filterset_fields = ["admission", "operating_room", "status"]
+
+    def get_queryset(self):
+        required = self.required_permission
+        code = required if isinstance(required, str) else required.get(self.request.method, "inpatient.operation.view")
+        allowed_departments = departments_for_permission(self.request.user, code)
+        return Operation.objects.filter(admission__department__in=allowed_departments).select_related(
+            "admission", "admission__department", "operating_room", "lead_surgeon",
+        ).prefetch_related("team")
+
+    def _checklist_action(self, request, method_name, error_message):
+        operation = self.get_object()
+        method = getattr(operation, method_name)
+        try:
+            changed = method(request.user)
+        except DjangoValidationError as exc:
+            raise drf_serializers.ValidationError(_validation_detail(exc))
+        if not changed:
+            return Response({"detail": error_message}, status=400)
+        return Response(self.get_serializer(operation).data)
+
+    @action(detail=True, methods=["post"], required_permission="inpatient.operation.checklist")
+    def sign_in(self, request, pk=None):
+        return self._checklist_action(request, "confirm_sign_in", "Sign In уже подтверждён.")
+
+    @action(detail=True, methods=["post"], required_permission="inpatient.operation.checklist")
+    def time_out(self, request, pk=None):
+        return self._checklist_action(request, "confirm_time_out", "Time Out уже подтверждён.")
+
+    @action(detail=True, methods=["post"], required_permission="inpatient.operation.checklist")
+    def sign_out(self, request, pk=None):
+        return self._checklist_action(request, "confirm_sign_out", "Sign Out уже подтверждён.")
+
+    @action(detail=True, methods=["post"])
+    def complete(self, request, pk=None):
+        operation = self.get_object()
+        try:
+            changed = operation.complete()
+        except DjangoValidationError as exc:
+            raise drf_serializers.ValidationError(_validation_detail(exc))
+        if not changed:
+            return Response({"detail": "Операция уже закрыта."}, status=400)
+        return Response(self.get_serializer(operation).data)
+
+    @action(detail=True, methods=["post"])
+    def cancel(self, request, pk=None):
+        operation = self.get_object()
+        if not operation.cancel():
+            return Response({"detail": "Операция уже закрыта."}, status=400)
+        return Response(self.get_serializer(operation).data)

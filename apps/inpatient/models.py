@@ -447,3 +447,193 @@ class VitalsRecord(models.Model):
             raise ValidationError("Нужно указать хотя бы один показатель.")
         if self.admission_id and self.admission.status != AdmissionStatus.ACTIVE:
             raise ValidationError("Нельзя добавить замер для завершённой госпитализации.")
+
+
+class OperatingRoom(models.Model):
+    """Операционная — расписываемый ресурс филиала (как Appointment
+    бронирует врача, Operation бронирует операционную), а не палата с
+    койками: Room/Bed моделируют пребывание пациента, операционная —
+    только слот времени. Не привязана к одному Department — операционная
+    обычно обслуживает несколько отделений сразу, поэтому это ресурс
+    ФИЛИАЛА (branch), тот же уровень, что структура Room/Bed, поэтому
+    управление ею (CRUD) идёт через тот же inpatient.department.manage,
+    а не отдельный код.
+    """
+
+    branch = models.ForeignKey(
+        "branches.Branch", on_delete=models.PROTECT, related_name="operating_rooms"
+    )
+    name = models.CharField(max_length=100)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["branch_id", "name"]
+        constraints = [
+            models.UniqueConstraint(fields=["branch", "name"], name="unique_operating_room_name_per_branch"),
+        ]
+
+    def __str__(self):
+        return f"{self.name} ({self.branch})"
+
+
+class OperationStatus(models.TextChoices):
+    SCHEDULED = "scheduled", "Запланирована"
+    COMPLETED = "completed", "Завершена"
+    CANCELLED = "cancelled", "Отменена"
+
+
+OPERATION_TERMINAL_STATUSES = (OperationStatus.COMPLETED, OperationStatus.CANCELLED)
+
+
+class Operation(models.Model):
+    """Операционный модуль — привязан к Admission (только стационарные
+    операции, амбулаторная хирургия вне рамок этой фазы). Самое сложное
+    в шаге (f), по договорённости проработано отдельно от остальной
+    структуры: чек-лист безопасности хирургии — три обязательные,
+    строго последовательные фазы (Sign In / Time Out / Sign Out, тот же
+    состав, что общепринятый чек-лист ВОЗ), а не свободный JSONField —
+    в отличие от Visit.diagnosis_snapshot (где структуры заведомо нет и
+    не будет), здесь структура фиксированная и известная заранее, так
+    что каждая фаза — собственная пара «кто подтвердил / когда», и
+    Operation.complete() физически не даст завершить операцию, если
+    Sign Out не подтверждён — это и есть смысл чек-листа безопасности,
+    не просто галочка в интерфейсе.
+    """
+
+    admission = models.ForeignKey(Admission, on_delete=models.PROTECT, related_name="operations")
+    operating_room = models.ForeignKey(OperatingRoom, on_delete=models.PROTECT, related_name="operations")
+    procedure_name = models.CharField(max_length=255, verbose_name="Операция")
+    starts_at = models.DateTimeField()
+    ends_at = models.DateTimeField()
+    lead_surgeon = models.ForeignKey(
+        "accounts.User", on_delete=models.PROTECT, related_name="operations_led"
+    )
+    team = models.ManyToManyField(
+        "accounts.User", blank=True, related_name="operations_assisted",
+        help_text="Остальной состав операционной бригады.",
+    )
+    status = models.CharField(
+        max_length=20, choices=OperationStatus.choices, default=OperationStatus.SCHEDULED
+    )
+
+    # Чек-лист безопасности хирургии — три фазы, каждая со своим
+    # подтверждающим и временем. Порядок соблюдается методами
+    # confirm_sign_in/confirm_time_out/confirm_sign_out ниже, не только
+    # проверкой на фронте.
+    sign_in_confirmed_by = models.ForeignKey(
+        "accounts.User", on_delete=models.PROTECT, null=True, blank=True, related_name="+"
+    )
+    sign_in_confirmed_at = models.DateTimeField(null=True, blank=True)
+    time_out_confirmed_by = models.ForeignKey(
+        "accounts.User", on_delete=models.PROTECT, null=True, blank=True, related_name="+"
+    )
+    time_out_confirmed_at = models.DateTimeField(null=True, blank=True)
+    sign_out_confirmed_by = models.ForeignKey(
+        "accounts.User", on_delete=models.PROTECT, null=True, blank=True, related_name="+"
+    )
+    sign_out_confirmed_at = models.DateTimeField(null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-starts_at"]
+        indexes = [
+            models.Index(fields=["operating_room", "starts_at"]),
+            models.Index(fields=["admission", "status"]),
+        ]
+
+    def __str__(self):
+        return f"{self.procedure_name} — {self.admission} ({self.get_status_display()})"
+
+    @property
+    def department(self):
+        return self.admission.department
+
+    def clean(self):
+        if self.pk:
+            original_status = (
+                Operation.objects.filter(pk=self.pk).values_list("status", flat=True).first()
+            )
+            if original_status in OPERATION_TERMINAL_STATUSES:
+                # Закрытая операция неизменяема целиком (не только статус)
+                # — тот же принцип, что делает Payment/Transfer append-only:
+                # хирургический протокол после завершения/отмены — история,
+                # не черновик, который можно поправить задним числом.
+                raise ValidationError(
+                    "Операция уже закрыта (%s) — изменения невозможны."
+                    % OperationStatus(original_status).label
+                )
+        if self.starts_at and self.ends_at and self.starts_at >= self.ends_at:
+            raise ValidationError("Начало операции должно быть раньше окончания.")
+        if self.operating_room_id and self.starts_at and self.ends_at:
+            # Тот же приём, что Appointment.clean()'s overlap-check —
+            # двойное бронирование операционной на пересекающееся время
+            # отклоняется (чек-лист Фазы 4 требует это явно).
+            overlapping = (
+                Operation.objects.filter(
+                    operating_room_id=self.operating_room_id,
+                    starts_at__lt=self.ends_at,
+                    ends_at__gt=self.starts_at,
+                )
+                .exclude(status__in=OPERATION_TERMINAL_STATUSES)
+                .exclude(pk=self.pk)
+                .exists()
+            )
+            if overlapping:
+                raise ValidationError(
+                    {"operating_room": "Операционная уже забронирована на пересекающееся время."}
+                )
+
+    def confirm_sign_in(self, user) -> bool:
+        """No-op-safe re-submit (returns False if already confirmed) —
+        same shape as every other terminal/idempotent transition in this
+        project, so a retried request can't silently overwrite who
+        actually confirmed it."""
+        if self.sign_in_confirmed_at is not None:
+            return False
+        self.sign_in_confirmed_by = user
+        self.sign_in_confirmed_at = timezone.now()
+        self.save(update_fields=["sign_in_confirmed_by", "sign_in_confirmed_at", "updated_at"])
+        return True
+
+    def confirm_time_out(self, user) -> bool:
+        if self.sign_in_confirmed_at is None:
+            raise ValidationError("Сначала нужно подтвердить Sign In.")
+        if self.time_out_confirmed_at is not None:
+            return False
+        self.time_out_confirmed_by = user
+        self.time_out_confirmed_at = timezone.now()
+        self.save(update_fields=["time_out_confirmed_by", "time_out_confirmed_at", "updated_at"])
+        return True
+
+    def confirm_sign_out(self, user) -> bool:
+        if self.time_out_confirmed_at is None:
+            raise ValidationError("Сначала нужно подтвердить Time Out.")
+        if self.sign_out_confirmed_at is not None:
+            return False
+        self.sign_out_confirmed_by = user
+        self.sign_out_confirmed_at = timezone.now()
+        self.save(update_fields=["sign_out_confirmed_by", "sign_out_confirmed_at", "updated_at"])
+        return True
+
+    def complete(self) -> bool:
+        """SCHEDULED -> COMPLETED. Physically refuses without a confirmed
+        Sign Out — the actual point of a surgical safety checklist, not
+        just a UI checkbox."""
+        if self.status in OPERATION_TERMINAL_STATUSES:
+            return False
+        if self.sign_out_confirmed_at is None:
+            raise ValidationError(
+                "Нельзя завершить операцию без подтверждённого Sign Out (чек-лист безопасности)."
+            )
+        self.status = OperationStatus.COMPLETED
+        self.save(update_fields=["status", "updated_at"])
+        return True
+
+    def cancel(self) -> bool:
+        if self.status in OPERATION_TERMINAL_STATUSES:
+            return False
+        self.status = OperationStatus.CANCELLED
+        self.save(update_fields=["status", "updated_at"])
+        return True

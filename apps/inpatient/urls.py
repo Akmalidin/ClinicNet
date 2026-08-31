@@ -7,6 +7,8 @@ from .views import (
     BedViewSet,
     ClinicalOrderViewSet,
     DepartmentViewSet,
+    OperatingRoomViewSet,
+    OperationViewSet,
     RoomViewSet,
     StaffDepartmentAssignmentViewSet,
     TransferViewSet,
@@ -22,6 +24,8 @@ router.register("admissions", AdmissionViewSet, basename="admission")
 router.register("transfers", TransferViewSet, basename="transfer")
 router.register("clinical-orders", ClinicalOrderViewSet, basename="clinical-order")
 router.register("vitals-records", VitalsRecordViewSet, basename="vitals-record")
+router.register("operating-rooms", OperatingRoomViewSet, basename="operating-room")
+router.register("operations", OperationViewSet, basename="operation")
 
 urlpatterns = [
     path("", include(router.urls)),
