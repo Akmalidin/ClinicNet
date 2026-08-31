@@ -63,7 +63,20 @@ class Visit(models.Model):
     def __str__(self):
         return f"{self.patient} — {self.doctor} ({self.get_status_display()})"
 
-    def close(self):
+    def close(self) -> bool:
+        """IN_PROGRESS -> COMPLETED. Returns False (no-op) if already
+        closed — same no-op-safe shape as Referral.mark_completed/
+        LabOrder.cancel, so a second close() (e.g. a retried request)
+        can't silently overwrite the original closed_at. Previously this
+        method existed but nothing in the API ever called it (found
+        during Phase 3 recon: VisitViewSet had no close/complete action
+        at all, just a raw PATCH on `status` with no state-transition
+        guard) — apps.inventory's stock deduction is wired to the real
+        action that now calls this (apps.visits.views.VisitViewSet.close).
+        """
+        if self.status != VisitStatus.IN_PROGRESS:
+            return False
         self.status = VisitStatus.COMPLETED
         self.closed_at = timezone.now()
         self.save(update_fields=["status", "closed_at", "updated_at"])
+        return True
