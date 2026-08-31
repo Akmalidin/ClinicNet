@@ -25,6 +25,9 @@ PERMISSIONS = [
     ("finance.manage", "finance", "Выставление счетов, приём платежей и возвраты"),
     ("pricing.manage", "finance", "Управление сетевым прайс-листом (каталог услуг)"),
     ("pricing.override", "finance", "Переопределение цены услуги для своего филиала"),
+    ("insurance.manage", "finance", "Управление каталогом страховых компаний"),
+    ("insurance.view", "finance", "Просмотр полисов пациентов"),
+    ("insurance.policy.manage", "finance", "Создание/редактирование полисов пациентов"),
 ]
 
 # codename -> (name, is_system, branch-agnostic description, permission codes)
@@ -60,6 +63,8 @@ ROLES = {
             # this role definition, controls. pricing.override (their own
             # branch's price exceptions) is the branch-level equivalent.
             "pricing.override",
+            "insurance.view",
+            "insurance.policy.manage",
         ],
     },
     "doctor": {
@@ -96,6 +101,11 @@ ROLES = {
             # (schedule/decline/reassign — решение врача или координатора филиала)
             # и не пишет клинические заметки (visit.* нет намеренно).
             "referrals.view",
+            # Front-desk intake is where a patient's insurance info
+            # actually gets collected — same reasoning as patient.manage
+            # already being theirs.
+            "insurance.view",
+            "insurance.policy.manage",
         ],
     },
     "cashier": {
@@ -108,6 +118,9 @@ ROLES = {
             "patient.view",
             "finance.view",
             "finance.manage",
+            # Needs to see a patient's policy to bill against it, but
+            # doesn't create/edit policies — that's reception/admin's job.
+            "insurance.view",
         ],
     },
 }

@@ -1,12 +1,36 @@
 from django.contrib import admin
 
-from .models import BranchPriceOverride, Invoice, InvoiceLine, Payment, Service
+from .models import (
+    BranchPriceOverride,
+    InsurancePolicy,
+    InsuranceProvider,
+    Invoice,
+    InvoiceLine,
+    Payment,
+    Service,
+)
 
 
 class BranchOverrideInline(admin.TabularInline):
     model = BranchPriceOverride
     extra = 0
     autocomplete_fields = ("branch",)
+
+
+@admin.register(InsuranceProvider)
+class InsuranceProviderAdmin(admin.ModelAdmin):
+    list_display = ("name", "code", "is_active")
+    list_filter = ("is_active",)
+    search_fields = ("name", "code")
+    prepopulated_fields = {"code": ("name",)}
+
+
+@admin.register(InsurancePolicy)
+class InsurancePolicyAdmin(admin.ModelAdmin):
+    list_display = ("patient", "provider", "policy_number", "coverage_percent", "coverage_limit", "is_active")
+    list_filter = ("provider", "is_active")
+    autocomplete_fields = ("patient", "provider")
+    search_fields = ("patient__last_name", "patient__first_name", "policy_number")
 
 
 @admin.register(Service)
@@ -41,7 +65,7 @@ class PaymentInline(admin.TabularInline):
 class InvoiceAdmin(admin.ModelAdmin):
     list_display = ("id", "patient", "branch", "status", "created_at")
     list_filter = ("branch", "status")
-    autocomplete_fields = ("patient", "branch", "source_visit", "issued_by")
+    autocomplete_fields = ("patient", "branch", "source_visit", "issued_by", "insurance_policy")
     search_fields = ("patient__last_name", "patient__first_name")
     date_hierarchy = "created_at"
     inlines = [InvoiceLineInline, PaymentInline]
