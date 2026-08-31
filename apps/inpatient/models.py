@@ -238,3 +238,51 @@ class Admission(models.Model):
         self.full_clean()
         self.save(update_fields=["status", "discharged_at", "discharge_epicrisis", "updated_at"])
         return True
+
+
+class Transfer(models.Model):
+    """Перевод — append-only лог, тот же принцип, что Payment/
+    StockMovement: Admission.department/bed отражают ТЕКУЩЕЕ
+    местоположение и меняются на месте, но история "откуда куда и
+    когда" не восстановима из одной только текущей пары department/bed
+    — поэтому каждый перевод фиксируется отдельной неизменяемой
+    записью (нужна для выписного эпикриза). Создаётся только как
+    побочный эффект apps.inpatient.services.transfer_admission, никогда
+    напрямую через API — TransferViewSet только для чтения.
+
+    from_department/from_bed и to_department/to_bed — тоже перевод
+    внутри одного отделения на другую койку (не только между
+    отделениями): модель называется "перевод" в широком смысле
+    "сменил местоположение", госпитализация-между-отделениями — частный
+    случай, отдельной модели для внутриотделенческого переноса заводить
+    не нужно.
+    """
+
+    admission = models.ForeignKey(Admission, on_delete=models.PROTECT, related_name="transfers")
+    from_department = models.ForeignKey(Department, on_delete=models.PROTECT, related_name="transfers_out")
+    from_bed = models.ForeignKey(Bed, on_delete=models.PROTECT, related_name="transfers_out")
+    to_department = models.ForeignKey(Department, on_delete=models.PROTECT, related_name="transfers_in")
+    to_bed = models.ForeignKey(Bed, on_delete=models.PROTECT, related_name="transfers_in")
+    reason = models.CharField(max_length=255, blank=True)
+    transferred_by = models.ForeignKey(
+        "accounts.User", on_delete=models.PROTECT, related_name="transfers_made"
+    )
+    transferred_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-transferred_at"]
+        indexes = [models.Index(fields=["admission", "-transferred_at"])]
+
+    def __str__(self):
+        return f"{self.admission} : {self.from_department} → {self.to_department}"
+
+    @property
+    def department(self):
+        """For HasDepartmentPermission's generic object-level resolution
+        — the destination is treated as "this row's department" (same
+        idea as Bed.department: the row belongs to wherever the patient
+        ended up), while list-level scoping (see AdmissionViewSet/
+        TransferViewSet.get_queryset) also includes from_department, so
+        a nurse who was in the FROM department still sees the historic
+        record of a patient who left it."""
+        return self.to_department

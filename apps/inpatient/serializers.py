@@ -1,7 +1,7 @@
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
-from .models import Admission, Bed, Department, Room, StaffDepartmentAssignment
+from .models import Admission, Bed, Department, Room, StaffDepartmentAssignment, Transfer
 
 
 class DepartmentSerializer(serializers.ModelSerializer):
@@ -112,3 +112,25 @@ class AdmissionSerializer(serializers.ModelSerializer):
                 exc.message_dict if hasattr(exc, "message_dict") else exc.messages
             )
         return attrs
+
+
+class TransferSerializer(serializers.ModelSerializer):
+    from_department_name = serializers.CharField(source="from_department.name", read_only=True)
+    to_department_name = serializers.CharField(source="to_department.name", read_only=True)
+    from_bed_label = serializers.CharField(source="from_bed.label", read_only=True)
+    to_bed_label = serializers.CharField(source="to_bed.label", read_only=True)
+    transferred_by_name = serializers.CharField(source="transferred_by.__str__", read_only=True)
+
+    class Meta:
+        model = Transfer
+        fields = (
+            "id", "admission",
+            "from_department", "from_department_name", "from_bed", "from_bed_label",
+            "to_department", "to_department_name", "to_bed", "to_bed_label",
+            "reason", "transferred_by", "transferred_by_name", "transferred_at",
+        )
+        # Append-only ledger — created only by AdmissionViewSet.transfer
+        # (apps.inpatient.services.transfer_admission), same shape as
+        # apps.finance.PaymentSerializer/apps.inventory.
+        # StockMovementSerializer.
+        read_only_fields = fields

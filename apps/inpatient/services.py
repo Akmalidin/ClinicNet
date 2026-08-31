@@ -1,7 +1,7 @@
 from django.core.exceptions import ValidationError
 from django.db import transaction
 
-from .models import Admission, AdmissionStatus, Bed, BedStatus
+from .models import Admission, AdmissionStatus, Bed, BedStatus, Transfer
 
 
 def admit_patient(*, patient, department, bed, attending_doctor, admitted_by, diagnosis_at_admission, admitted_at=None):
@@ -48,3 +48,47 @@ def discharge_admission(admission: Admission, epicrisis: str = "") -> bool:
         if changed:
             Bed.objects.filter(pk=admission.bed_id).update(status=BedStatus.FREE)
     return changed
+
+
+def transfer_admission(*, admission: Admission, to_department, to_bed, transferred_by, reason: str = "") -> Transfer:
+    """Moves an ACTIVE admission to a new department/bed and logs a
+    Transfer row, atomically: frees the old bed, occupies the new one,
+    updates the admission's current location in place. Validates the
+    target bed the same way admit_patient validates on intake (FREE/
+    RESERVED only) — Admission.full_clean() additionally re-checks the
+    bed-belongs-to-department and no-double-booking guards on the new
+    location, since it's the same model-level invariant either way.
+    """
+    if admission.status != AdmissionStatus.ACTIVE:
+        raise ValidationError("Перевод возможен только для активной госпитализации.")
+    if to_bed.room.department_id != to_department.pk:
+        raise ValidationError({"to_bed": "Койка не принадлежит указанному отделению."})
+    if to_bed.pk == admission.bed_id:
+        raise ValidationError({"to_bed": "Пациент уже на этой койке."})
+    if to_bed.status not in (BedStatus.FREE, BedStatus.RESERVED):
+        raise ValidationError(
+            {"to_bed": f"Койка недоступна для перевода (статус: {to_bed.get_status_display()})."}
+        )
+
+    from_department = admission.department
+    from_bed = admission.bed
+
+    admission.department = to_department
+    admission.bed = to_bed
+    admission.full_clean()
+
+    with transaction.atomic():
+        admission.save(update_fields=["department", "bed", "updated_at"])
+        Bed.objects.filter(pk=from_bed.pk).update(status=BedStatus.FREE)
+        Bed.objects.filter(pk=to_bed.pk).update(status=BedStatus.OCCUPIED)
+        transfer = Transfer.objects.create(
+            admission=admission,
+            from_department=from_department,
+            from_bed=from_bed,
+            to_department=to_department,
+            to_bed=to_bed,
+            reason=reason,
+            transferred_by=transferred_by,
+        )
+
+    return transfer
