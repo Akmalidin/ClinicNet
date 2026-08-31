@@ -65,3 +65,10 @@ export const notificationsApi = {
   list: (params) => client.get('notifications/', { params }),
   markRead: (id) => client.patch(`notifications/${id}/`, { is_read: true }),
 }
+
+export const labOrdersApi = {
+  list: (params) => client.get('lab-orders/', { params }),
+  create: (data) => client.post('lab-orders/', data),
+  addResult: (id, data) => client.post(`lab-orders/${id}/result/`, data),
+  cancel: (id) => client.post(`lab-orders/${id}/cancel/`),
+}

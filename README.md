@@ -8,17 +8,17 @@
 **Фаза 1 — Фундамент** (Branch + RBAC v2 + мультифилиальное расписание) —
 готово, дизайн в [`docs/PHASE1-DESIGN.md`](docs/PHASE1-DESIGN.md).
 
-**Текущая фаза: Фаза 2 — Клинический контур** (единая ЭМК + модуль
-направлений + базовая диагностика). Бэкенд (модели, API, RBAC, уведомления,
-`available-slots`) готов и задеплоен — дизайн в
-[`docs/PHASE2-REFERRALS-DESIGN.md`](docs/PHASE2-REFERRALS-DESIGN.md),
-спецификация направлений — [`docs/ClinicNet-Referrals-Prompt.md`](docs/ClinicNet-Referrals-Prompt.md).
-Frontend направлений — в работе, план в
-[`docs/ClinicNet-Phase2-Frontend-Prompt.md`](docs/ClinicNet-Phase2-Frontend-Prompt.md)
-(`ReferralModal.vue` для сценария "внутри одного филиала" готов — см.
-[`frontend/README.md`](frontend/README.md)). Осталось: кросс-филиальный
-сценарий модалки, `ReferralQueueWidget.vue`, `ReferralBadge.vue`, базовая
-диагностика.
+**Фаза 2 — Клинический контур** (единая ЭМК + модуль направлений + базовая
+диагностика) — готова: бэкенд и фронтенд направлений (модели, API, RBAC,
+уведомления, `available-slots`, `ReferralModal`/`ReferralQueueWidget`/
+`ReferralBadge`) и базовая диагностика (`LabOrder`/`LabResult` — заказ
+анализа из карты пациента, ручной ввод результата, отметка "вне нормы").
+Дизайн — [`docs/PHASE2-REFERRALS-DESIGN.md`](docs/PHASE2-REFERRALS-DESIGN.md),
+спецификации — [`docs/ClinicNet-Referrals-Prompt.md`](docs/ClinicNet-Referrals-Prompt.md),
+[`docs/ClinicNet-Phase2-Frontend-Prompt.md`](docs/ClinicNet-Phase2-Frontend-Prompt.md).
+Фронтенд — см. [`frontend/README.md`](frontend/README.md).
+
+Фаза 3 (Финансы и склад) не начата — ждёт явного запроса, см. мастер-план.
 
 ## Стек
 
@@ -67,6 +67,7 @@ apps/
   visits/          # Visit — клиническая запись приёма (Фаза 2)
   referrals/       # Referral — направления между врачами + API/actions (Фаза 2)
   notifications/   # Notification — внутренний инбокс (без WA/Telegram-провода)
+  diagnostics/     # LabOrder/LabResult — базовая диагностика (Фаза 2)
 docs/              # мастер-план по фазам + дизайн-документы фаз
 frontend/          # Vue 3 SPA — см. frontend/README.md
 ```

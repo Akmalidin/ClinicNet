@@ -3,6 +3,8 @@ import { onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 
 import { patientsApi, visitsApi } from '../api'
+import LabOrderModal from '../components/diagnostics/LabOrderModal.vue'
+import LabOrdersSection from '../components/diagnostics/LabOrdersSection.vue'
 import ReferralModal from '../components/referrals/ReferralModal.vue'
 
 const props = defineProps({ id: { type: [String, Number], required: true } })
@@ -14,6 +16,11 @@ const loadError = ref('')
 const modalOpen = ref(false)
 const activeVisit = ref(null)
 const justCreated = ref(null)
+
+const labOrderModalOpen = ref(false)
+const activeLabOrderVisit = ref(null)
+const labOrdersSection = ref(null)
+const labOrderJustCreated = ref(false)
 
 async function load() {
   loadError.value = ''
@@ -39,6 +46,17 @@ function openReferral(visit) {
 function onCreated(referral) {
   justCreated.value = referral
 }
+
+function openLabOrder(visit) {
+  activeLabOrderVisit.value = visit
+  labOrderJustCreated.value = false
+  labOrderModalOpen.value = true
+}
+
+async function onLabOrderCreated() {
+  labOrderJustCreated.value = true
+  await labOrdersSection.value?.load()
+}
 </script>
 
 <template>
@@ -58,6 +76,9 @@ function onCreated(referral) {
       <div v-if="justCreated" class="card p-4 border-accent bg-green-50 text-sm text-green-800">
         Направление создано и отправлено врачу (статус: {{ justCreated.status }}).
       </div>
+      <div v-if="labOrderJustCreated" class="card p-4 border-accent bg-green-50 text-sm text-green-800">
+        Анализ заказан.
+      </div>
 
       <section v-if="patient" class="card p-4 space-y-1 text-sm text-gray-600">
         <p v-if="patient.phone">Телефон: {{ patient.phone }}</p>
@@ -76,11 +97,16 @@ function onCreated(referral) {
                 <span class="badge-gray">{{ visit.status }}</span>
               </p>
             </div>
-            <button class="btn-secondary shrink-0" @click="openReferral(visit)">Направить →</button>
+            <div class="shrink-0 flex gap-1">
+              <button class="btn-secondary" @click="openLabOrder(visit)">Заказать анализ</button>
+              <button class="btn-secondary" @click="openReferral(visit)">Направить →</button>
+            </div>
           </li>
         </ul>
         <p v-if="visits.length === 0" class="text-sm text-gray-400">Приёмов пока нет.</p>
       </section>
+
+      <LabOrdersSection v-if="patient" ref="labOrdersSection" :patient-id="id" />
     </main>
 
     <ReferralModal
@@ -90,6 +116,14 @@ function onCreated(referral) {
       :visit="activeVisit"
       @close="modalOpen = false"
       @created="onCreated"
+    />
+    <LabOrderModal
+      v-if="activeLabOrderVisit"
+      :open="labOrderModalOpen"
+      :patient="patient"
+      :visit="activeLabOrderVisit"
+      @close="labOrderModalOpen = false"
+      @created="onLabOrderCreated"
     />
   </div>
 </template>

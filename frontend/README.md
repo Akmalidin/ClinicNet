@@ -94,5 +94,19 @@ in the DB.
   appointments at all yet. Verified: badge shown only on the referred
   appointment, absent on a walk-in in the same list, correct tooltip text.
 
-All four referral frontend steps from the spec (5-8) are done. Next up:
-basic diagnostics (lab order + manual result entry) — not started.
+All four referral frontend steps from the spec (5-8) are done.
+
+## Basic diagnostics
+
+* ✅ `LabOrderModal.vue` — order form (test type, comment, urgency),
+  triggered per-visit from the patient card, same pattern as
+  `ReferralModal`'s trigger.
+* ✅ `LabOrdersSection.vue` — a patient's lab orders with inline result
+  entry (result text + "вне нормы" checkbox) and cancel; both actions
+  disappear once an order is closed. Verified against a real dev tenant:
+  order → appears as "ordered" → result entered and flagged abnormal →
+  status flips to "completed", badge + result text render correctly,
+  actions gone.
+
+Phase 2 (referrals + diagnostics, backend and frontend) is now complete.
+Phase 3 is explicitly on hold — see the root `README.md`.

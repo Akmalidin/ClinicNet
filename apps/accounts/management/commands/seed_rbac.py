@@ -19,6 +19,8 @@ PERMISSIONS = [
     ("visit.manage", "visits", "Создание/редактирование приёмов (клинических записей)"),
     ("referrals.view", "referrals", "Просмотр направлений"),
     ("referrals.manage", "referrals", "Создание/обработка направлений (schedule/decline/reassign)"),
+    ("diagnostics.view", "diagnostics", "Просмотр заказов анализов и результатов"),
+    ("diagnostics.manage", "diagnostics", "Заказ анализа, ввод результата, отмена заказа"),
 ]
 
 # codename -> (name, is_system, branch-agnostic description, permission codes)
@@ -43,6 +45,8 @@ ROLES = {
             "visit.manage",
             "referrals.view",
             "referrals.manage",
+            "diagnostics.view",
+            "diagnostics.manage",
         ],
     },
     "doctor": {
@@ -56,6 +60,8 @@ ROLES = {
             "appointment.manage",
             "visit.view",
             "visit.manage",
+            "diagnostics.view",
+            "diagnostics.manage",
             # referrals.view/manage НЕ выдаются врачу намеренно: это права
             # координатора/сети на очередь ЦЕЛОГО филиала (own_branch-scope
             # тут означало бы "видит весь список направлений своего
