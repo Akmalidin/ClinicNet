@@ -31,6 +31,10 @@ PERMISSIONS = [
     ("inventory.manage", "inventory", "Управление сетевым каталогом расходников"),
     ("inventory.view", "inventory", "Просмотр остатков и движений склада филиала"),
     ("inventory.stock.manage", "inventory", "Приход/списание/корректировка остатков филиала"),
+    ("inpatient.department.view", "inpatient", "Просмотр отделений, палат и коечного фонда"),
+    ("inpatient.department.manage", "inpatient", "Создание/редактирование отделений, палат и коек"),
+    ("inpatient.admission.view", "inpatient", "Просмотр госпитализаций своего отделения/филиала"),
+    ("inpatient.admission.manage", "inpatient", "Госпитализация, выписка своего отделения/филиала"),
 ]
 
 # codename -> (name, is_system, branch-agnostic description, permission codes)
@@ -75,6 +79,20 @@ ROLES = {
             # branch-level equivalent, same shape as pricing.override.
             "inventory.view",
             "inventory.stock.manage",
+            # inpatient.department.manage (коечный фонд филиала — создание
+            # отделений/палат/коек) выдаётся здесь, в отличие от
+            # pricing.manage/insurance.manage/inventory.manage — это НЕ
+            # сетевой каталог, а структура конкретного филиала (см.
+            # apps.inpatient.models.Department), поэтому own_branch-скоуп
+            # тут корректен, ALL-scope не требуется.
+            "inpatient.department.view",
+            "inpatient.department.manage",
+            # inpatient.admission.manage — филиальный админ видит и ведёт
+            # госпитализации по всем отделениям СВОЕГО филиала (тот же
+            # принцип, что finance.manage/visit.manage): own_branch-грант
+            # здесь не сужается по отделениям — см. apps.inpatient.rbac.
+            "inpatient.admission.view",
+            "inpatient.admission.manage",
         ],
     },
     "doctor": {
@@ -96,6 +114,14 @@ ROLES = {
             # flows from visit.manage (already theirs), not a separate
             # inventory grant — see VisitViewSet.close().
             "inventory.view",
+            # Лечащий врач стационара — own_branch-грант даёт видимость по
+            # ВСЕМ отделениям своего филиала, не только "своему" (в
+            # отличие от медсестры/зав. отделением ниже) — этот проект
+            # не моделирует "врач приписан к одному отделению", см.
+            # apps.inpatient.rbac.departments_for_permission.
+            "inpatient.department.view",
+            "inpatient.admission.view",
+            "inpatient.admission.manage",
             # referrals.view/manage НЕ выдаются врачу намеренно: это права
             # координатора/сети на очередь ЦЕЛОГО филиала (own_branch-scope
             # тут означало бы "видит весь список направлений своего
@@ -138,6 +164,40 @@ ROLES = {
             # doesn't create/edit policies — that's reception/admin's job.
             "insurance.view",
         ],
+    },
+    "department-head": {
+        "name": "Заведующий отделением",
+        "is_system": True,
+        "permissions": [
+            "branch.view",
+            "patient.view",
+            "inpatient.department.view",
+            "inpatient.admission.view",
+            "inpatient.admission.manage",
+        ],
+        # Department-scoped, NOT branch-scoped: provision this role's
+        # UserRole with branch_scope=SPECIFIC_BRANCHES and NO branches
+        # attached — that already resolves to "reaches no branches" via
+        # apps.accounts.rbac.branches_for_permission, so the ONLY source
+        # of visible departments becomes StaffDepartmentAssignment (see
+        # apps.inpatient.rbac.departments_for_permission's docstring for
+        # why this is deliberate, not a workaround).
+    },
+    "nurse": {
+        "name": "Постовая медсестра",
+        "is_system": True,
+        "permissions": [
+            "branch.view",
+            "patient.view",
+            "inpatient.admission.view",
+        ],
+        # Same department-scoped provisioning note as "department-head"
+        # above — SPECIFIC_BRANCHES with no branches, real reach comes
+        # from StaffDepartmentAssignment. inpatient.admission.manage
+        # (admit/discharge) is deliberately NOT granted — that's a
+        # doctor/department-head decision; a nurse's own actions
+        # (назначения/лист наблюдения) land here in later steps of
+        # Фаза 4 (ClinicalOrder execution, VitalsRecord).
     },
 }
 
