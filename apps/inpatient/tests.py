@@ -13,6 +13,9 @@ from .models import (
     AdmissionStatus,
     Bed,
     BedStatus,
+    ClinicalOrder,
+    ClinicalOrderStatus,
+    ClinicalOrderType,
     Department,
     Room,
     StaffDepartmentAssignment,
@@ -585,3 +588,190 @@ class TransferAPIRBACTests(TenantTestCase):
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]["from_department"], self.dept_therapy.pk)
         self.assertEqual(response.data[0]["to_department"], self.dept_surgery.pk)
+
+
+class ClinicalOrderModelTests(TenantTestCase):
+    def setUp(self):
+        self.branch = Branch.objects.create(name="Филиал А", code="a")
+        self.department = Department.objects.create(branch=self.branch, name="Терапия", code="therapy")
+        self.room = Room.objects.create(department=self.department, name="204")
+        self.bed = Bed.objects.create(room=self.room, label="1")
+        self.doctor = User.objects.create(username="doc")
+        self.nurse = User.objects.create(username="nurse")
+        self.patient = Patient.objects.create(first_name="Тест", last_name="Пациентов")
+        self.admission = admit_patient(
+            patient=self.patient, department=self.department, bed=self.bed,
+            attending_doctor=self.doctor, admitted_by=self.doctor, diagnosis_at_admission="ОРВИ",
+        )
+
+    def _order(self):
+        return ClinicalOrder.objects.create(
+            admission=self.admission, order_type=ClinicalOrderType.MEDICATION,
+            description="Парацетамол 500мг", ordered_by=self.doctor,
+        )
+
+    def test_cannot_create_order_for_discharged_admission(self):
+        discharge_admission(self.admission)
+        order = ClinicalOrder(
+            admission=self.admission, order_type=ClinicalOrderType.MEDICATION,
+            description="Парацетамол", ordered_by=self.doctor,
+        )
+        with self.assertRaises(ValidationError):
+            order.full_clean()
+
+    def test_complete_sets_performed_fields(self):
+        order = self._order()
+        self.assertTrue(order.complete(performed_by=self.nurse, note="Принято, реакции нет."))
+        self.assertEqual(order.status, ClinicalOrderStatus.COMPLETED)
+        self.assertEqual(order.performed_by, self.nurse)
+        self.assertIsNotNone(order.performed_at)
+
+    def test_complete_is_a_no_op_once_terminal(self):
+        order = self._order()
+        order.complete(performed_by=self.nurse)
+        self.assertFalse(order.complete(performed_by=self.nurse))
+
+    def test_cancel_is_a_no_op_once_terminal(self):
+        order = self._order()
+        order.cancel()
+        self.assertFalse(order.cancel())
+
+    def test_cannot_reopen_completed_order(self):
+        order = self._order()
+        order.complete(performed_by=self.nurse)
+        order.status = ClinicalOrderStatus.ORDERED
+        with self.assertRaises(ValidationError):
+            order.full_clean()
+
+
+class ClinicalOrderAPIRBACTests(TenantTestCase):
+    """Ключевой кейс: врач назначает (order.manage), медсестра выполняет
+    (order.perform) — два разных права, и медсестра не может создавать/
+    отменять назначения, только отмечать выполнение. Плюс чек-листовый
+    кейс: повторное выполнение уже выполненного назначения отклоняется.
+    """
+
+    def setUp(self):
+        self.branch = Branch.objects.create(name="Филиал А", code="a")
+        self.department = Department.objects.create(branch=self.branch, name="Терапия", code="therapy")
+        self.other_department = Department.objects.create(branch=self.branch, name="Хирургия", code="surgery")
+        self.room = Room.objects.create(department=self.department, name="204")
+        self.bed = Bed.objects.create(room=self.room, label="1")
+        self.patient = Patient.objects.create(first_name="Тест", last_name="Пациентов")
+
+        view_perm = Permission.objects.create(code="inpatient.order.view", category="inpatient")
+        manage_perm = Permission.objects.create(code="inpatient.order.manage", category="inpatient")
+        perform_perm = Permission.objects.create(code="inpatient.order.perform", category="inpatient")
+        admission_manage_perm = Permission.objects.create(code="inpatient.admission.manage", category="inpatient")
+
+        doctor_role = Role.objects.create(name="Врач", codename="doctor")
+        for perm in (view_perm, manage_perm, perform_perm, admission_manage_perm):
+            RolePermission.objects.create(role=doctor_role, permission=perm)
+
+        nurse_role = Role.objects.create(name="Постовая медсестра", codename="nurse")
+        RolePermission.objects.create(role=nurse_role, permission=view_perm)
+        RolePermission.objects.create(role=nurse_role, permission=perform_perm)
+        # Deliberately NOT granted manage — a nurse executes, doesn't order.
+
+        self.doctor = User.objects.create(username="doc")
+        UserRole.objects.create(user=self.doctor, role=doctor_role, branch_scope=BranchScope.OWN_BRANCH)
+        StaffBranchAssignment.objects.create(
+            staff=self.doctor, branch=self.branch, weekday=Weekday.MONDAY,
+            start_time=time(9, 0), end_time=time(18, 0),
+        )
+
+        self.nurse = User.objects.create(username="nurse")
+        UserRole.objects.create(user=self.nurse, role=nurse_role, branch_scope=BranchScope.SPECIFIC_BRANCHES)
+        StaffDepartmentAssignment.objects.create(staff=self.nurse, department=self.department)
+
+        self.nurse_other = User.objects.create(username="nurse_other")
+        UserRole.objects.create(user=self.nurse_other, role=nurse_role, branch_scope=BranchScope.SPECIFIC_BRANCHES)
+        StaffDepartmentAssignment.objects.create(staff=self.nurse_other, department=self.other_department)
+
+        self.admission = admit_patient(
+            patient=self.patient, department=self.department, bed=self.bed,
+            attending_doctor=self.doctor, admitted_by=self.doctor, diagnosis_at_admission="ОРВИ",
+        )
+        self.host = self.domain.domain
+
+    def _client_for(self, user):
+        client = APIClient()
+        client.force_authenticate(user=user)
+        return client
+
+    def test_doctor_creates_order(self):
+        client = self._client_for(self.doctor)
+        response = client.post(
+            "/api/v1/clinical-orders/",
+            {"admission": self.admission.pk, "order_type": "medication", "description": "Парацетамол 500мг"},
+            HTTP_HOST=self.host,
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["status"], ClinicalOrderStatus.ORDERED)
+
+    def test_nurse_cannot_create_order(self):
+        client = self._client_for(self.nurse)
+        response = client.post(
+            "/api/v1/clinical-orders/",
+            {"admission": self.admission.pk, "order_type": "medication", "description": "Парацетамол 500мг"},
+            HTTP_HOST=self.host,
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_nurse_completes_a_doctors_order(self):
+        order = ClinicalOrder.objects.create(
+            admission=self.admission, order_type=ClinicalOrderType.MEDICATION,
+            description="Парацетамол 500мг", ordered_by=self.doctor,
+        )
+        client = self._client_for(self.nurse)
+        response = client.post(
+            f"/api/v1/clinical-orders/{order.pk}/complete/",
+            {"performed_note": "Принято в 09:00."},
+            HTTP_HOST=self.host,
+        )
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["status"], ClinicalOrderStatus.COMPLETED)
+        self.assertEqual(response.data["performed_by"], self.nurse.pk)
+
+    def test_repeated_completion_of_the_same_order_is_rejected(self):
+        """Чек-лист Фазы 4: "повторное выполнение уже выполненного
+        назначения — API должен отказать" — тот же паттерн, что result/
+        на закрытом LabOrder (Фаза 2)."""
+        order = ClinicalOrder.objects.create(
+            admission=self.admission, order_type=ClinicalOrderType.MEDICATION,
+            description="Парацетамол 500мг", ordered_by=self.doctor,
+        )
+        client = self._client_for(self.nurse)
+        first = client.post(f"/api/v1/clinical-orders/{order.pk}/complete/", {}, HTTP_HOST=self.host)
+        self.assertEqual(first.status_code, 200, first.data)
+
+        second = client.post(f"/api/v1/clinical-orders/{order.pk}/complete/", {}, HTTP_HOST=self.host)
+        self.assertEqual(second.status_code, 400)
+
+    def test_nurse_from_other_department_cannot_complete_order(self):
+        order = ClinicalOrder.objects.create(
+            admission=self.admission, order_type=ClinicalOrderType.MEDICATION,
+            description="Парацетамол 500мг", ordered_by=self.doctor,
+        )
+        client = self._client_for(self.nurse_other)
+        response = client.post(f"/api/v1/clinical-orders/{order.pk}/complete/", {}, HTTP_HOST=self.host)
+        self.assertEqual(response.status_code, 404)
+
+    def test_nurse_cannot_cancel_order(self):
+        order = ClinicalOrder.objects.create(
+            admission=self.admission, order_type=ClinicalOrderType.MEDICATION,
+            description="Парацетамол 500мг", ordered_by=self.doctor,
+        )
+        client = self._client_for(self.nurse)
+        response = client.post(f"/api/v1/clinical-orders/{order.pk}/cancel/", {}, HTTP_HOST=self.host)
+        self.assertEqual(response.status_code, 403)
+
+    def test_doctor_cancels_order(self):
+        order = ClinicalOrder.objects.create(
+            admission=self.admission, order_type=ClinicalOrderType.MEDICATION,
+            description="Парацетамол 500мг", ordered_by=self.doctor,
+        )
+        client = self._client_for(self.doctor)
+        response = client.post(f"/api/v1/clinical-orders/{order.pk}/cancel/", {}, HTTP_HOST=self.host)
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["status"], ClinicalOrderStatus.CANCELLED)

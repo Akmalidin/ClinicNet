@@ -1,7 +1,7 @@
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
-from .models import Admission, Bed, Department, Room, StaffDepartmentAssignment, Transfer
+from .models import Admission, Bed, ClinicalOrder, Department, Room, StaffDepartmentAssignment, Transfer
 
 
 class DepartmentSerializer(serializers.ModelSerializer):
@@ -134,3 +134,54 @@ class TransferSerializer(serializers.ModelSerializer):
         # apps.finance.PaymentSerializer/apps.inventory.
         # StockMovementSerializer.
         read_only_fields = fields
+
+
+class ClinicalOrderSerializer(serializers.ModelSerializer):
+    ordered_by_name = serializers.CharField(source="ordered_by.__str__", read_only=True)
+    performed_by_name = serializers.CharField(source="performed_by.__str__", read_only=True, default=None)
+
+    class Meta:
+        model = ClinicalOrder
+        fields = (
+            "id", "admission", "order_type", "description", "scheduled_for",
+            "ordered_by", "ordered_by_name", "status",
+            "performed_by", "performed_by_name", "performed_at", "performed_note",
+            "created_at", "updated_at",
+        )
+        # Execution (performed_*) happens only through the `complete`
+        # action, cancellation through `cancel` — same terminal-status
+        # transition shape as Invoice/Referral/LabOrder, never a raw
+        # PATCH on status.
+        read_only_fields = (
+            "id", "ordered_by", "status", "performed_by", "performed_at",
+            "performed_note", "created_at", "updated_at",
+        )
+
+    def validate(self, attrs):
+        if self.instance:
+            # Editing an existing order (description/scheduled_for while
+            # still ORDERED) — re-run clean() so the terminal-status
+            # guard applies here too.
+            instance = ClinicalOrder(
+                pk=self.instance.pk,
+                admission=self.instance.admission,
+                order_type=attrs.get("order_type", self.instance.order_type),
+                description=attrs.get("description", self.instance.description),
+                scheduled_for=attrs.get("scheduled_for", self.instance.scheduled_for),
+                ordered_by=self.instance.ordered_by,
+                status=self.instance.status,
+            )
+        else:
+            instance = ClinicalOrder(
+                admission=attrs.get("admission"),
+                order_type=attrs.get("order_type"),
+                description=attrs.get("description"),
+                scheduled_for=attrs.get("scheduled_for"),
+            )
+        try:
+            instance.clean()
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(
+                exc.message_dict if hasattr(exc, "message_dict") else exc.messages
+            )
+        return attrs

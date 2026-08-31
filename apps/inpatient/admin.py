@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Admission, Bed, Department, Room, StaffDepartmentAssignment, Transfer
+from .models import Admission, Bed, ClinicalOrder, Department, Room, StaffDepartmentAssignment, Transfer
 
 
 @admin.register(Department)
@@ -55,3 +55,11 @@ class TransferAdmin(admin.ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):
         return False
+
+
+@admin.register(ClinicalOrder)
+class ClinicalOrderAdmin(admin.ModelAdmin):
+    list_display = ("admission", "order_type", "description", "status", "ordered_by", "performed_by")
+    list_filter = ("admission__department__branch", "order_type", "status")
+    autocomplete_fields = ("admission", "ordered_by", "performed_by")
+    date_hierarchy = "created_at"

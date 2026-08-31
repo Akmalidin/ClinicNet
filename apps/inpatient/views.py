@@ -10,12 +10,24 @@ from apps.accounts.permissions import HasBranchPermission
 from apps.accounts.rbac import branches_for_permission
 from apps.patients.models import Patient
 
-from .models import Admission, AdmissionStatus, Bed, BedStatus, Department, Room, StaffDepartmentAssignment, Transfer
+from .models import (
+    Admission,
+    AdmissionStatus,
+    Bed,
+    BedStatus,
+    ClinicalOrder,
+    ClinicalOrderStatus,
+    Department,
+    Room,
+    StaffDepartmentAssignment,
+    Transfer,
+)
 from .permissions import HasDepartmentPermission
 from .rbac import departments_for_permission
 from .serializers import (
     AdmissionSerializer,
     BedSerializer,
+    ClinicalOrderSerializer,
     DepartmentSerializer,
     RoomSerializer,
     StaffDepartmentAssignmentSerializer,
@@ -263,3 +275,59 @@ class TransferViewSet(viewsets.ReadOnlyModelViewSet):
         return Transfer.objects.filter(
             Q(from_department__in=allowed_departments) | Q(to_department__in=allowed_departments)
         ).select_related("admission", "from_department", "from_bed", "to_department", "to_bed", "transferred_by")
+
+
+class ClinicalOrderViewSet(viewsets.ModelViewSet):
+    """Назначения — department-scoped, same reach as AdmissionViewSet
+    (get_object() resolves ClinicalOrder.department -> admission.
+    department for free). Ordering (create/cancel) and execution
+    (complete) are deliberately DIFFERENT permission codes — see
+    seed_rbac.py: a doctor orders, a nurse executes, and the `complete`
+    action overrides required_permission for exactly that reason.
+    """
+
+    serializer_class = ClinicalOrderSerializer
+    permission_classes = [HasDepartmentPermission]
+    required_permission = {
+        "GET": "inpatient.order.view",
+        "POST": "inpatient.order.manage",
+        "PUT": "inpatient.order.manage",
+        "PATCH": "inpatient.order.manage",
+        "DELETE": "inpatient.order.manage",
+    }
+    filterset_fields = ["admission", "order_type", "status"]
+
+    def get_queryset(self):
+        # required_permission is a per-action string on `complete` (see
+        # below — the @action decorator's initkwargs replace it just for
+        # that dispatch), a method-keyed dict everywhere else — same
+        # dict-or-string shape HasDepartmentPermission._required_code
+        # already handles, mirrored here since get_queryset needs the
+        # same resolution independently of the permission class.
+        required = self.required_permission
+        code = required if isinstance(required, str) else required.get(self.request.method, "inpatient.order.view")
+        allowed_departments = departments_for_permission(self.request.user, code)
+        return ClinicalOrder.objects.filter(admission__department__in=allowed_departments).select_related(
+            "admission", "admission__department", "ordered_by", "performed_by"
+        )
+
+    def perform_create(self, serializer):
+        serializer.save(ordered_by=self.request.user)
+
+    @action(detail=True, methods=["post"], required_permission="inpatient.order.perform")
+    def complete(self, request, pk=None):
+        """Отмечает назначение выполненным — постовая медсестра
+        (inpatient.order.perform), не обязательно тот, кто назначил.
+        Повторное выполнение уже выполненного назначения отклоняется —
+        тот же паттерн, что LabOrder's result/ guard (Фаза 2)."""
+        order = self.get_object()
+        if not order.complete(performed_by=request.user, note=request.data.get("performed_note", "")):
+            return Response({"detail": "Назначение уже закрыто и не может быть выполнено повторно."}, status=400)
+        return Response(self.get_serializer(order).data)
+
+    @action(detail=True, methods=["post"])
+    def cancel(self, request, pk=None):
+        order = self.get_object()
+        if not order.cancel():
+            return Response({"detail": "Назначение уже закрыто и не может быть изменено."}, status=400)
+        return Response(self.get_serializer(order).data)
