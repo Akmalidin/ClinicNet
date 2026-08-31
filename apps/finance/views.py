@@ -10,11 +10,20 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from apps.accounts.permissions import HasBranchPermission
+from apps.accounts.permissions import HasBranchPermission, HasNetworkWidePermission
 from apps.accounts.rbac import branches_for_permission
 
-from .models import ZERO, Invoice, InvoiceLine, InvoiceStatus, Payment, PaymentKind
-from .serializers import InvoiceSerializer, PaymentSerializer
+from .models import (
+    ZERO,
+    BranchPriceOverride,
+    Invoice,
+    InvoiceLine,
+    InvoiceStatus,
+    Payment,
+    PaymentKind,
+    Service,
+)
+from .serializers import BranchPriceOverrideSerializer, InvoiceSerializer, PaymentSerializer, ServiceSerializer
 
 
 def _validation_detail(exc: DjangoValidationError):
@@ -60,15 +69,38 @@ class InvoiceViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"])
     def add_line(self, request, pk=None):
         """Only while DRAFT — InvoiceLine.clean() enforces this too, this
-        is just the friendlier 400 before hitting that guard."""
+        is just the friendlier 400 before hitting that guard.
+
+        Two ways to call this: pass `service` (a Service id) to bill from
+        the price catalog — description/unit_price are resolved and
+        snapshotted server-side via Service.price_for(invoice.branch), so
+        a cashier never has to know or type the branch's actual price,
+        and it can never diverge from what BranchPriceOverride actually
+        says (client-supplied description/unit_price are ignored when
+        `service` is given, precisely so a line can't claim to be a
+        catalog service billed at a made-up price). Or pass
+        description/unit_price directly for an ad-hoc line with no
+        catalog entry — the same free-text path step (a) already had.
+        """
         invoice = self.get_object()
-        description = (request.data.get("description") or "").strip()
-        unit_price = request.data.get("unit_price")
-        if not description or unit_price is None:
-            return Response({"detail": "Укажите описание и цену позиции."}, status=400)
+
+        service_id = request.data.get("service")
+        if service_id:
+            service = Service.objects.filter(pk=service_id, is_active=True).first()
+            if not service:
+                return Response({"detail": "Услуга не найдена или неактивна."}, status=400)
+            description = service.name
+            unit_price = service.price_for(invoice.branch)
+        else:
+            description = (request.data.get("description") or "").strip()
+            unit_price = request.data.get("unit_price")
+            service = None
+            if not description or unit_price is None:
+                return Response({"detail": "Укажите описание и цену позиции."}, status=400)
 
         line = InvoiceLine(
             invoice=invoice,
+            service=service,
             description=description,
             quantity=request.data.get("quantity", 1),
             unit_price=unit_price,
@@ -194,6 +226,49 @@ class PaymentViewSet(viewsets.ReadOnlyModelViewSet):
         return Payment.objects.filter(branch__in=allowed_branches).select_related(
             "branch", "invoice", "received_by"
         )
+
+
+class ServiceViewSet(viewsets.ModelViewSet):
+    """The network-wide price catalog (Phase 3 step (b)). Reads are open
+    to any authenticated user — a price list isn't sensitive, and every
+    role that bills patients needs to see it. Writes require
+    pricing.manage with an ALL-scope grant specifically (see
+    HasNetworkWidePermission's docstring): editing the catalog affects
+    every branch at once, so an own_branch grant must not be enough —
+    that's what BranchPriceOverride is for.
+    """
+
+    serializer_class = ServiceSerializer
+    permission_classes = [HasNetworkWidePermission]
+    required_permission = {
+        "POST": "pricing.manage",
+        "PUT": "pricing.manage",
+        "PATCH": "pricing.manage",
+        "DELETE": "pricing.manage",
+    }
+    filterset_fields = ["is_active"]
+    queryset = Service.objects.prefetch_related("branch_overrides__branch")
+
+
+class BranchPriceOverrideViewSet(viewsets.ModelViewSet):
+    """One branch's exception to a Service's network price. Reads open to
+    any authenticated user (same reasoning as ServiceViewSet — pricing
+    isn't sensitive); writes require pricing.override for that specific
+    branch (own_branch scope is exactly right here, unlike Service —
+    overriding your own branch's price for a service is a branch-level
+    decision, not a network-wide one).
+    """
+
+    serializer_class = BranchPriceOverrideSerializer
+    permission_classes = [HasBranchPermission]
+    required_permission = {
+        "POST": "pricing.override",
+        "PUT": "pricing.override",
+        "PATCH": "pricing.override",
+        "DELETE": "pricing.override",
+    }
+    filterset_fields = ["service", "branch"]
+    queryset = BranchPriceOverride.objects.select_related("service", "branch")
 
 
 class FinanceReportView(generics.GenericAPIView):

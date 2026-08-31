@@ -19,6 +19,79 @@ TERMINAL_STATUSES = (InvoiceStatus.CANCELLED,)
 ZERO = Decimal("0")
 
 
+class Service(models.Model):
+    """The network-wide price catalog — Phase 3 step (b): "единый прайс с
+    возможностью филиал-специфичных цен" (master plan). `base_price` is
+    the network default; a branch that needs a different price for this
+    service gets a `BranchPriceOverride` row instead of a whole separate
+    catalog — no duplicating the price list per branch.
+
+    Deliberately network-wide (no `branch` field): a service like
+    "Консультация" is the same *service* everywhere, only its price can
+    differ per branch. Managing this catalog (create/edit/deactivate a
+    service, or change its base_price) is a network-wide action —
+    requires an ALL-scope grant of pricing.manage (see
+    apps.accounts.permissions.HasNetworkWidePermission) — while setting a
+    branch's override is a branch-scoped action any branch-admin can do
+    for their own branch (pricing.override, via HasBranchPermission on
+    BranchPriceOverride).
+    """
+
+    name = models.CharField(max_length=200)
+    code = models.SlugField(max_length=100, unique=True)
+    base_price = models.DecimalField(max_digits=10, decimal_places=2)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+    def clean(self):
+        if self.base_price is not None and self.base_price < ZERO:
+            raise ValidationError({"base_price": "Цена не может быть отрицательной."})
+
+    def price_for(self, branch) -> Decimal:
+        """The effective price at `branch` — its override if one exists,
+        otherwise the network base_price. This is what add_line resolves
+        at billing time and snapshots onto InvoiceLine.unit_price; a later
+        change here or to the override never touches an already-billed
+        line (see InvoiceLine's docstring)."""
+        override = self.branch_overrides.filter(branch=branch).first()
+        return override.price if override else self.base_price
+
+
+class BranchPriceOverride(models.Model):
+    """One branch's exception to a Service's network base_price — not a
+    duplicate price list, just the deltas. Absence of a row for a given
+    (service, branch) pair means "use the network price", not "no price
+    set" — Service.price_for() falls back to base_price automatically.
+    """
+
+    service = models.ForeignKey(Service, on_delete=models.CASCADE, related_name="branch_overrides")
+    branch = models.ForeignKey(
+        "branches.Branch", on_delete=models.CASCADE, related_name="service_price_overrides"
+    )
+    price = models.DecimalField(max_digits=10, decimal_places=2)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["service", "branch"], name="one_override_per_service_branch"),
+        ]
+
+    def __str__(self):
+        return f"{self.service} @ {self.branch}: {self.price}"
+
+    def clean(self):
+        if self.price is not None and self.price < ZERO:
+            raise ValidationError({"price": "Цена не может быть отрицательной."})
+
+
 class Invoice(models.Model):
     """A bill for services rendered — Phase 3's "мультикасса": every
     invoice belongs to exactly one branch's cash register (master plan:
@@ -140,16 +213,25 @@ class Invoice(models.Model):
 
 
 class InvoiceLine(models.Model):
-    """One billed item — free-text description for now (same choice
-    already made for Visit.reason/LabOrder.test_type before a dedicated
-    catalog exists). Phase 3 step (b) adds an optional `service` FK once
-    Service/Price exists, without removing description/unit_price — those
-    stay the snapshot of what was actually charged at billing time, immune
-    to a later price change in the catalog (same "snapshot, not live
-    link" principle as Referral.diagnosis_snapshot).
+    """One billed item. `service` is optional — set when the line was
+    added from the price catalog (InvoiceViewSet.add_line resolves
+    Service.price_for(invoice.branch) and snapshots the result onto
+    description/unit_price at that moment); null for an ad-hoc line typed
+    in free-text, the same choice already made for Visit.reason/
+    LabOrder.test_type before a catalog existed.
+
+    description/unit_price are ALWAYS the snapshot of what was actually
+    charged, service or not — a later change to Service.base_price or a
+    BranchPriceOverride never touches an already-billed line (same
+    "snapshot, not live link" principle as Referral.diagnosis_snapshot).
+    `service` itself is kept only for reporting ("how much did
+    Консультация bring in this month"), never re-read for the price.
     """
 
     invoice = models.ForeignKey(Invoice, on_delete=models.CASCADE, related_name="lines")
+    service = models.ForeignKey(
+        Service, on_delete=models.PROTECT, null=True, blank=True, related_name="invoice_lines",
+    )
     description = models.CharField(max_length=255)
     quantity = models.PositiveIntegerField(default=1)
     unit_price = models.DecimalField(max_digits=10, decimal_places=2)

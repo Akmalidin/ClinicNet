@@ -1,11 +1,27 @@
 from django.contrib import admin
 
-from .models import Invoice, InvoiceLine, Payment
+from .models import BranchPriceOverride, Invoice, InvoiceLine, Payment, Service
+
+
+class BranchOverrideInline(admin.TabularInline):
+    model = BranchPriceOverride
+    extra = 0
+    autocomplete_fields = ("branch",)
+
+
+@admin.register(Service)
+class ServiceAdmin(admin.ModelAdmin):
+    list_display = ("name", "code", "base_price", "is_active")
+    list_filter = ("is_active",)
+    search_fields = ("name", "code")
+    prepopulated_fields = {"code": ("name",)}
+    inlines = [BranchOverrideInline]
 
 
 class InvoiceLineInline(admin.TabularInline):
     model = InvoiceLine
     extra = 0
+    autocomplete_fields = ("service",)
 
 
 class PaymentInline(admin.TabularInline):

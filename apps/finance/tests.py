@@ -9,7 +9,7 @@ from apps.accounts.models import BranchScope, Permission, Role, RolePermission, 
 from apps.branches.models import Branch, StaffBranchAssignment, Weekday
 from apps.patients.models import Patient
 
-from .models import Invoice, InvoiceLine, InvoiceStatus, Payment, PaymentKind
+from .models import BranchPriceOverride, Invoice, InvoiceLine, InvoiceStatus, Payment, PaymentKind, Service
 
 
 class InvoiceModelTests(TenantTestCase):
@@ -284,3 +284,168 @@ class InvoiceAPITests(TenantTestCase):
         report_b = client_b.get("/api/v1/finance/report/", HTTP_HOST=self.host)
         self.assertEqual(report_b.data["by_branch"], [])
         self.assertEqual(Decimal(report_b.data["network_total"]), Decimal("0"))
+
+
+class ServicePricingModelTests(TenantTestCase):
+    def setUp(self):
+        self.branch_a = Branch.objects.create(name="Филиал А", code="a")
+        self.branch_b = Branch.objects.create(name="Филиал Б", code="b")
+        self.service = Service.objects.create(name="Консультация", code="consult", base_price=Decimal("500"))
+
+    def test_price_for_falls_back_to_base_price(self):
+        self.assertEqual(self.service.price_for(self.branch_a), Decimal("500"))
+
+    def test_price_for_uses_branch_override(self):
+        BranchPriceOverride.objects.create(service=self.service, branch=self.branch_a, price=Decimal("650"))
+        self.assertEqual(self.service.price_for(self.branch_a), Decimal("650"))
+        # Branch B has no override — still the network base price.
+        self.assertEqual(self.service.price_for(self.branch_b), Decimal("500"))
+
+    def test_only_one_override_per_service_branch(self):
+        BranchPriceOverride.objects.create(service=self.service, branch=self.branch_a, price=Decimal("650"))
+        with self.assertRaises(Exception):
+            BranchPriceOverride.objects.create(service=self.service, branch=self.branch_a, price=Decimal("700"))
+
+
+class ServicePricingAPITests(TenantTestCase):
+    """RBAC split: pricing.manage needs ALL scope (network catalog),
+    pricing.override is branch-scoped (per-branch exceptions) — and the
+    checklist's explicit case: a service billed at a branch with an
+    override must invoice at the LOCAL price, not the network base."""
+
+    def setUp(self):
+        self.branch_a = Branch.objects.create(name="Филиал А", code="a")
+        self.branch_b = Branch.objects.create(name="Филиал Б", code="b")
+
+        manage_perm = Permission.objects.create(code="pricing.manage", category="finance")
+        override_perm = Permission.objects.create(code="pricing.override", category="finance")
+        finance_view = Permission.objects.create(code="finance.view", category="finance")
+        finance_manage = Permission.objects.create(code="finance.manage", category="finance")
+
+        network_admin_role = Role.objects.create(name="Администратор сети", codename="network-admin")
+        RolePermission.objects.create(role=network_admin_role, permission=manage_perm)
+
+        branch_admin_role = Role.objects.create(name="Администратор филиала", codename="branch-admin")
+        RolePermission.objects.create(role=branch_admin_role, permission=override_perm)
+
+        cashier_role = Role.objects.create(name="Кассир", codename="cashier")
+        RolePermission.objects.create(role=cashier_role, permission=finance_view)
+        RolePermission.objects.create(role=cashier_role, permission=finance_manage)
+
+        self.network_admin = User.objects.create(username="net_admin")
+        UserRole.objects.create(user=self.network_admin, role=network_admin_role, branch_scope=BranchScope.ALL)
+
+        self.branch_admin_a = User.objects.create(username="admin_a")
+        UserRole.objects.create(
+            user=self.branch_admin_a, role=branch_admin_role, branch_scope=BranchScope.OWN_BRANCH
+        )
+        StaffBranchAssignment.objects.create(
+            staff=self.branch_admin_a, branch=self.branch_a, weekday=Weekday.MONDAY,
+            start_time=time(9, 0), end_time=time(18, 0),
+        )
+        # A branch-admin is NOT automatically network-wide, even though
+        # the role holds most other .manage codes elsewhere — pricing.manage
+        # itself isn't even granted to this role (see seed_rbac.py).
+
+        self.cashier_a = User.objects.create(username="cashier_a")
+        UserRole.objects.create(user=self.cashier_a, role=cashier_role, branch_scope=BranchScope.OWN_BRANCH)
+        StaffBranchAssignment.objects.create(
+            staff=self.cashier_a, branch=self.branch_a, weekday=Weekday.MONDAY,
+            start_time=time(9, 0), end_time=time(18, 0),
+        )
+
+        self.patient = Patient.objects.create(first_name="Тест", last_name="Пациентов")
+        self.host = self.domain.domain
+
+    def _client_for(self, user):
+        client = APIClient()
+        client.force_authenticate(user=user)
+        return client
+
+    def test_network_admin_can_create_service(self):
+        client = self._client_for(self.network_admin)
+        response = client.post(
+            "/api/v1/services/", {"name": "Консультация", "code": "consult", "base_price": "500"},
+            HTTP_HOST=self.host,
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+
+    def test_branch_admin_cannot_create_service(self):
+        """own_branch scope must not satisfy pricing.manage — editing the
+        network catalog isn't a branch-level action, however many other
+        .manage codes this role otherwise holds."""
+        client = self._client_for(self.branch_admin_a)
+        response = client.post(
+            "/api/v1/services/", {"name": "Консультация", "code": "consult", "base_price": "500"},
+            HTTP_HOST=self.host,
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_branch_admin_can_override_own_branch_price(self):
+        service = Service.objects.create(name="Консультация", code="consult", base_price=Decimal("500"))
+        client = self._client_for(self.branch_admin_a)
+        response = client.post(
+            "/api/v1/price-overrides/",
+            {"service": service.pk, "branch": self.branch_a.pk, "price": "650"},
+            HTTP_HOST=self.host,
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+
+    def test_branch_admin_cannot_override_other_branch_price(self):
+        service = Service.objects.create(name="Консультация", code="consult", base_price=Decimal("500"))
+        client = self._client_for(self.branch_admin_a)
+        response = client.post(
+            "/api/v1/price-overrides/",
+            {"service": service.pk, "branch": self.branch_b.pk, "price": "650"},
+            HTTP_HOST=self.host,
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_invoice_line_from_service_bills_at_local_override_price(self):
+        """The Phase 3 checklist's core (b) case: a service with a
+        branch-specific override invoices at the LOCAL price, not the
+        network base."""
+        service = Service.objects.create(name="Консультация", code="consult", base_price=Decimal("500"))
+        BranchPriceOverride.objects.create(service=service, branch=self.branch_a, price=Decimal("650"))
+
+        client = self._client_for(self.cashier_a)
+        create = client.post(
+            "/api/v1/invoices/", {"patient": self.patient.pk, "branch": self.branch_a.pk}, HTTP_HOST=self.host,
+        )
+        invoice_id = create.data["id"]
+        add = client.post(
+            f"/api/v1/invoices/{invoice_id}/add_line/", {"service": service.pk, "quantity": 1}, HTTP_HOST=self.host,
+        )
+        self.assertEqual(add.status_code, 201, add.data)
+        self.assertEqual(add.data["lines"][0]["unit_price"], "650.00")
+        self.assertEqual(add.data["lines"][0]["description"], "Консультация")
+        self.assertEqual(add.data["total_amount"], "650.00")
+
+    def test_invoice_line_from_service_without_override_bills_network_price(self):
+        service = Service.objects.create(name="Рентген", code="xray", base_price=Decimal("300"))
+        client = self._client_for(self.cashier_a)
+        create = client.post(
+            "/api/v1/invoices/", {"patient": self.patient.pk, "branch": self.branch_a.pk}, HTTP_HOST=self.host,
+        )
+        invoice_id = create.data["id"]
+        add = client.post(
+            f"/api/v1/invoices/{invoice_id}/add_line/", {"service": service.pk}, HTTP_HOST=self.host,
+        )
+        self.assertEqual(add.data["lines"][0]["unit_price"], "300.00")
+
+    def test_forged_price_on_service_line_is_ignored(self):
+        """Sending a client-supplied unit_price alongside `service` must
+        never override the server-resolved catalog price — same "own
+        never client-supplied" reasoning as Referral.from_doctor."""
+        service = Service.objects.create(name="Консультация", code="consult", base_price=Decimal("500"))
+        client = self._client_for(self.cashier_a)
+        create = client.post(
+            "/api/v1/invoices/", {"patient": self.patient.pk, "branch": self.branch_a.pk}, HTTP_HOST=self.host,
+        )
+        invoice_id = create.data["id"]
+        add = client.post(
+            f"/api/v1/invoices/{invoice_id}/add_line/",
+            {"service": service.pk, "unit_price": "1"},
+            HTTP_HOST=self.host,
+        )
+        self.assertEqual(add.data["lines"][0]["unit_price"], "500.00")
