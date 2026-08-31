@@ -1,9 +1,11 @@
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.db.models import Sum
 from django.db.models.functions import Coalesce
+from django.utils import timezone
 
 
 class InvoiceStatus(models.TextChoices):
@@ -92,6 +94,100 @@ class BranchPriceOverride(models.Model):
             raise ValidationError({"price": "Цена не может быть отрицательной."})
 
 
+class InsuranceProvider(models.Model):
+    """Catalog of insurance companies — Phase 3 step (c): "лимиты по
+    полису, разделение чека пациент/страховая", explicitly internal logic
+    only (no external API to verify a policy or submit a claim, confirmed
+    before building this). A lightweight network-wide catalog, same shape
+    as Service — no external integration means no need to store anything
+    beyond a name/code to reference.
+    """
+
+    name = models.CharField(max_length=200)
+    code = models.SlugField(max_length=100, unique=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+
+class InsurancePolicy(models.Model):
+    """One patient's policy with one provider. `coverage_percent` (what
+    fraction of a bill the insurer pays) and `coverage_limit` (the total
+    the policy will ever pay out, across every invoice against it) are
+    exactly the "лимиты по полису" the phase asked for — deliberately
+    simple compared to a real insurer's rules (no per-service exclusions,
+    no annual reset), matching the same "не полноценный CDSS"-style scope
+    limit already applied to LabResult.is_abnormal.
+
+    Policies are patient data, not branch data (same reasoning as Patient
+    itself being network-wide) — a patient's policy applies at whichever
+    branch they're billed at.
+    """
+
+    patient = models.ForeignKey(
+        "patients.Patient", on_delete=models.CASCADE, related_name="insurance_policies"
+    )
+    provider = models.ForeignKey(InsuranceProvider, on_delete=models.PROTECT, related_name="policies")
+    policy_number = models.CharField(max_length=100)
+    coverage_percent = models.PositiveSmallIntegerField(
+        default=100,
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+        help_text="Какую долю каждого счёта покрывает страховая (0-100%).",
+    )
+    coverage_limit = models.DecimalField(
+        max_digits=12, decimal_places=2,
+        help_text="Общий лимит покрытия по полису — сумма всех счетов, оплаченных страховой, не может его превысить.",
+    )
+    valid_from = models.DateField(null=True, blank=True)
+    valid_until = models.DateField(null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["patient"])]
+
+    def __str__(self):
+        return f"{self.provider} №{self.policy_number} — {self.patient}"
+
+    def clean(self):
+        if self.coverage_limit is not None and self.coverage_limit < ZERO:
+            raise ValidationError({"coverage_limit": "Лимит не может быть отрицательным."})
+        if self.valid_from and self.valid_until and self.valid_from > self.valid_until:
+            raise ValidationError({"valid_until": "Дата окончания раньше даты начала."})
+
+    def is_valid_on(self, date) -> bool:
+        if not self.is_active:
+            return False
+        if self.valid_from and date < self.valid_from:
+            return False
+        if self.valid_until and date > self.valid_until:
+            return False
+        return True
+
+    @property
+    def used_amount(self) -> Decimal:
+        """Sum of insurance_covered_amount across every non-draft,
+        non-cancelled invoice already billed against this policy — a
+        cancelled invoice's coverage is excluded, so cancelling one
+        automatically frees that part of the limit back up for the next
+        invoice, with no separate "release" step needed (see Invoice.cancel).
+        """
+        return self.invoices.exclude(
+            status__in=(InvoiceStatus.DRAFT, InvoiceStatus.CANCELLED)
+        ).aggregate(s=Coalesce(Sum("insurance_covered_amount"), ZERO))["s"]
+
+    @property
+    def remaining_limit(self) -> Decimal:
+        return max(self.coverage_limit - self.used_amount, ZERO)
+
+
 class Invoice(models.Model):
     """A bill for services rendered — Phase 3's "мультикасса": every
     invoice belongs to exactly one branch's cash register (master plan:
@@ -105,6 +201,14 @@ class Invoice(models.Model):
     касса не сходится" has to be answerable from the actual line items and
     payment history, never from a running number that could silently drift
     out of sync with them.
+
+    insurance_covered_amount is the one exception to "always computed,
+    never stored" (see InsurancePolicy.used_amount): a policy's remaining
+    limit is shared across every invoice billed against it, so how much
+    THIS invoice claims has to be decided and locked in at issue() time,
+    using the state of every earlier invoice against that same policy —
+    it genuinely can't be a live-recomputed property the way total_amount
+    is, because it depends on other rows, not just this one's own lines.
     """
 
     patient = models.ForeignKey(
@@ -123,6 +227,18 @@ class Invoice(models.Model):
     )
     issued_by = models.ForeignKey(
         "accounts.User", on_delete=models.PROTECT, related_name="invoices_issued"
+    )
+    insurance_policy = models.ForeignKey(
+        InsurancePolicy,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="invoices",
+        help_text="Полис, по которому разделяется чек — необязателен (обычная оплата, если не указан).",
+    )
+    insurance_covered_amount = models.DecimalField(
+        max_digits=10, decimal_places=2, default=Decimal("0"),
+        help_text="Снимок доли счёта, покрытой страховой — считается один раз при issue(), см. докстринг класса.",
     )
     status = models.CharField(
         max_length=20, choices=InvoiceStatus.choices, default=InvoiceStatus.DRAFT
@@ -143,14 +259,25 @@ class Invoice(models.Model):
 
     def clean(self):
         if self.pk:
-            original_status = (
-                Invoice.objects.filter(pk=self.pk).values_list("status", flat=True).first()
+            original = (
+                Invoice.objects.filter(pk=self.pk)
+                .values("status", "insurance_policy_id")
+                .first()
             )
-            if original_status in TERMINAL_STATUSES and original_status != self.status:
-                raise ValidationError(
-                    "Счёт уже отменён (%s) — статус больше нельзя менять."
-                    % InvoiceStatus(original_status).label
-                )
+            if original:
+                if original["status"] in TERMINAL_STATUSES and original["status"] != self.status:
+                    raise ValidationError(
+                        "Счёт уже отменён (%s) — статус больше нельзя менять."
+                        % InvoiceStatus(original["status"]).label
+                    )
+                if (
+                    original["status"] != InvoiceStatus.DRAFT
+                    and original["insurance_policy_id"] != self.insurance_policy_id
+                ):
+                    raise ValidationError(
+                        "Полис нельзя менять после выставления счёта — "
+                        "доля страховой уже зафиксирована."
+                    )
 
     @property
     def total_amount(self) -> Decimal:
@@ -158,6 +285,17 @@ class Invoice(models.Model):
             total=Coalesce(Sum(models.F("quantity") * models.F("unit_price")), ZERO)
         )
         return agg["total"]
+
+    @property
+    def patient_owed_amount(self) -> Decimal:
+        """What the PATIENT owes at this register — total_amount minus
+        whatever the policy covers (insurance_covered_amount, snapshotted
+        at issue()). balance_due/is_paid track this, not total_amount:
+        the insurer's share isn't collected through Payment/pay() at all
+        in this phase (no external claims integration — see the model
+        docstring), so counting it as "still due" here would make an
+        invoice with insurance look permanently unpaid at the register."""
+        return self.total_amount - self.insurance_covered_amount
 
     @property
     def paid_total(self) -> Decimal:
@@ -171,7 +309,7 @@ class Invoice(models.Model):
 
     @property
     def balance_due(self) -> Decimal:
-        return self.total_amount - self.paid_total
+        return self.patient_owed_amount - self.paid_total
 
     @property
     def is_paid(self) -> bool:
@@ -184,14 +322,30 @@ class Invoice(models.Model):
         already guards this specific path) so the terminal-status guard
         in clean() stays real defense-in-depth against any other code
         path that sets .status directly — same belt-and-suspenders style
-        already used in Referral's schedule/decline actions."""
+        already used in Referral's schedule/decline actions.
+
+        If insurance_policy is set, this is where insurance_covered_amount
+        gets computed and locked in — capped by both the policy's
+        coverage_percent and whatever's left of its coverage_limit at
+        this exact moment (earlier invoices against the same policy have
+        first claim; see InsurancePolicy.remaining_limit)."""
         if self.status != InvoiceStatus.DRAFT:
             return False
         if not self.lines.exists():
             raise ValidationError("В счёте нет ни одной позиции — нечего выставлять.")
+
+        if self.insurance_policy_id:
+            policy = self.insurance_policy
+            if not policy.is_valid_on(timezone.now().date()):
+                raise ValidationError(
+                    {"insurance_policy": "Полис недействителен (неактивен или истёк срок)."}
+                )
+            by_percent = (self.total_amount * policy.coverage_percent) / Decimal("100")
+            self.insurance_covered_amount = min(by_percent, policy.remaining_limit, self.total_amount)
+
         self.status = InvoiceStatus.ISSUED
         self.full_clean()
-        self.save(update_fields=["status", "updated_at"])
+        self.save(update_fields=["status", "insurance_covered_amount", "updated_at"])
         return True
 
     def cancel(self) -> bool:

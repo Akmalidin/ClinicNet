@@ -10,12 +10,14 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from apps.accounts.permissions import HasBranchPermission, HasNetworkWidePermission
+from apps.accounts.permissions import HasBranchPermission, HasNetworkWidePermission, HasPermission
 from apps.accounts.rbac import branches_for_permission
 
 from .models import (
     ZERO,
     BranchPriceOverride,
+    InsurancePolicy,
+    InsuranceProvider,
     Invoice,
     InvoiceLine,
     InvoiceStatus,
@@ -23,7 +25,14 @@ from .models import (
     PaymentKind,
     Service,
 )
-from .serializers import BranchPriceOverrideSerializer, InvoiceSerializer, PaymentSerializer, ServiceSerializer
+from .serializers import (
+    BranchPriceOverrideSerializer,
+    InsurancePolicySerializer,
+    InsuranceProviderSerializer,
+    InvoiceSerializer,
+    PaymentSerializer,
+    ServiceSerializer,
+)
 
 
 def _validation_detail(exc: DjangoValidationError):
@@ -59,7 +68,7 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         allowed_branches = branches_for_permission(self.request.user, code)
         return (
             Invoice.objects.filter(branch__in=allowed_branches)
-            .select_related("branch", "patient", "issued_by", "source_visit")
+            .select_related("branch", "patient", "issued_by", "source_visit", "insurance_policy__provider")
             .prefetch_related("lines", "payments")
         )
 
@@ -269,6 +278,51 @@ class BranchPriceOverrideViewSet(viewsets.ModelViewSet):
     }
     filterset_fields = ["service", "branch"]
     queryset = BranchPriceOverride.objects.select_related("service", "branch")
+
+
+class InsuranceProviderViewSet(viewsets.ModelViewSet):
+    """Catalog of insurance companies. Reads open to any authenticated
+    user (same reasoning as ServiceViewSet — the list of providers isn't
+    sensitive, only a specific patient's policy is); writes require
+    insurance.manage with an ALL-scope grant (HasNetworkWidePermission,
+    same shape as pricing.manage — a network-wide catalog edit shouldn't
+    be satisfiable by an own_branch grant).
+    """
+
+    serializer_class = InsuranceProviderSerializer
+    permission_classes = [HasNetworkWidePermission]
+    required_permission = {
+        "POST": "insurance.manage",
+        "PUT": "insurance.manage",
+        "PATCH": "insurance.manage",
+        "DELETE": "insurance.manage",
+    }
+    filterset_fields = ["is_active"]
+    queryset = InsuranceProvider.objects.all()
+
+
+class InsurancePolicyViewSet(viewsets.ModelViewSet):
+    """A patient's insurance policy — patient data, not branch data (same
+    reasoning as PatientViewSet: a policy applies wherever the patient is
+    billed, not to one branch), so this uses HasPermission (branch
+    -agnostic) like Patient/Specialty rather than HasBranchPermission.
+    insurance.view (read) is separate from insurance.policy.manage
+    (write) — deliberately gated behind a real permission unlike the
+    network catalogs above, since a policy carries patient-specific data
+    (policy number, coverage), not just a public price list.
+    """
+
+    serializer_class = InsurancePolicySerializer
+    permission_classes = [HasPermission]
+    required_permission = {
+        "GET": "insurance.view",
+        "POST": "insurance.policy.manage",
+        "PUT": "insurance.policy.manage",
+        "PATCH": "insurance.policy.manage",
+        "DELETE": "insurance.policy.manage",
+    }
+    filterset_fields = ["patient", "provider", "is_active"]
+    queryset = InsurancePolicy.objects.select_related("patient", "provider")
 
 
 class FinanceReportView(generics.GenericAPIView):

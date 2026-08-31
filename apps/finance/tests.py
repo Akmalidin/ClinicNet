@@ -1,4 +1,4 @@
-from datetime import time
+from datetime import date, time, timedelta
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError
@@ -9,7 +9,17 @@ from apps.accounts.models import BranchScope, Permission, Role, RolePermission, 
 from apps.branches.models import Branch, StaffBranchAssignment, Weekday
 from apps.patients.models import Patient
 
-from .models import BranchPriceOverride, Invoice, InvoiceLine, InvoiceStatus, Payment, PaymentKind, Service
+from .models import (
+    BranchPriceOverride,
+    InsurancePolicy,
+    InsuranceProvider,
+    Invoice,
+    InvoiceLine,
+    InvoiceStatus,
+    Payment,
+    PaymentKind,
+    Service,
+)
 
 
 class InvoiceModelTests(TenantTestCase):
@@ -449,3 +459,252 @@ class ServicePricingAPITests(TenantTestCase):
             HTTP_HOST=self.host,
         )
         self.assertEqual(add.data["lines"][0]["unit_price"], "500.00")
+
+
+class InsurancePolicyModelTests(TenantTestCase):
+    def setUp(self):
+        self.branch = Branch.objects.create(name="Филиал А", code="a")
+        self.cashier = User.objects.create(username="cashier")
+        self.patient = Patient.objects.create(first_name="Тест", last_name="Пациентов")
+        self.provider = InsuranceProvider.objects.create(name="СтомСтрах", code="stomstrakh")
+
+    def _policy(self, **overrides):
+        defaults = dict(
+            patient=self.patient, provider=self.provider, policy_number="POL-1",
+            coverage_percent=100, coverage_limit=Decimal("10000"),
+        )
+        defaults.update(overrides)
+        return InsurancePolicy.objects.create(**defaults)
+
+    def test_is_valid_on_respects_date_range(self):
+        policy = self._policy(valid_from=date(2026, 1, 1), valid_until=date(2026, 12, 31))
+        self.assertTrue(policy.is_valid_on(date(2026, 6, 1)))
+        self.assertFalse(policy.is_valid_on(date(2025, 12, 31)))
+        self.assertFalse(policy.is_valid_on(date(2027, 1, 1)))
+
+    def test_inactive_policy_is_never_valid(self):
+        policy = self._policy(is_active=False)
+        self.assertFalse(policy.is_valid_on(date.today()))
+
+    def test_used_amount_excludes_draft_and_cancelled(self):
+        policy = self._policy()
+        draft = Invoice.objects.create(patient=self.patient, branch=self.branch, issued_by=self.cashier, insurance_policy=policy)
+        InvoiceLine.objects.create(invoice=draft, description="Приём", quantity=1, unit_price=Decimal("100"))
+        # draft — issue() not called, so insurance_covered_amount is still 0 anyway,
+        # but exercise the exclusion logic directly:
+        draft.insurance_covered_amount = Decimal("100")
+        draft.save(update_fields=["insurance_covered_amount"])
+        self.assertEqual(policy.used_amount, Decimal("0"))
+
+        draft.status = InvoiceStatus.CANCELLED
+        draft.save(update_fields=["status"])
+        self.assertEqual(policy.used_amount, Decimal("0"))
+
+    def test_remaining_limit_after_use(self):
+        policy = self._policy(coverage_limit=Decimal("1000"))
+        invoice = Invoice.objects.create(
+            patient=self.patient, branch=self.branch, issued_by=self.cashier, insurance_policy=policy,
+        )
+        InvoiceLine.objects.create(invoice=invoice, description="Приём", quantity=1, unit_price=Decimal("400"))
+        invoice.issue()
+        self.assertEqual(invoice.insurance_covered_amount, Decimal("400"))
+        self.assertEqual(policy.remaining_limit, Decimal("600"))
+
+
+class InvoiceInsuranceSplitTests(TenantTestCase):
+    """The Phase 3 checklist's core (c) case: coverage_percent and
+    coverage_limit actually split the bill, in the right order across
+    multiple invoices, and cancelling frees the limit back up."""
+
+    def setUp(self):
+        self.branch = Branch.objects.create(name="Филиал А", code="a")
+        self.cashier = User.objects.create(username="cashier")
+        self.patient = Patient.objects.create(first_name="Тест", last_name="Пациентов")
+        self.provider = InsuranceProvider.objects.create(name="СтомСтрах", code="stomstrakh")
+
+    def _invoice_with_line(self, policy, total="1000"):
+        invoice = Invoice.objects.create(
+            patient=self.patient, branch=self.branch, issued_by=self.cashier, insurance_policy=policy,
+        )
+        InvoiceLine.objects.create(invoice=invoice, description="Приём", quantity=1, unit_price=Decimal(total))
+        return invoice
+
+    def test_split_by_coverage_percent(self):
+        policy = InsurancePolicy.objects.create(
+            patient=self.patient, provider=self.provider, policy_number="P1",
+            coverage_percent=80, coverage_limit=Decimal("10000"),
+        )
+        invoice = self._invoice_with_line(policy, total="1000")
+        invoice.issue()
+        self.assertEqual(invoice.insurance_covered_amount, Decimal("800"))
+        self.assertEqual(invoice.patient_owed_amount, Decimal("200"))
+        self.assertEqual(invoice.balance_due, Decimal("200"))
+
+    def test_split_capped_by_remaining_limit(self):
+        policy = InsurancePolicy.objects.create(
+            patient=self.patient, provider=self.provider, policy_number="P1",
+            coverage_percent=100, coverage_limit=Decimal("500"),
+        )
+        invoice = self._invoice_with_line(policy, total="1000")
+        invoice.issue()
+        self.assertEqual(invoice.insurance_covered_amount, Decimal("500"))  # capped, not 1000
+        self.assertEqual(invoice.patient_owed_amount, Decimal("500"))
+
+    def test_second_invoice_gets_only_whats_left_of_the_limit(self):
+        policy = InsurancePolicy.objects.create(
+            patient=self.patient, provider=self.provider, policy_number="P1",
+            coverage_percent=100, coverage_limit=Decimal("700"),
+        )
+        first = self._invoice_with_line(policy, total="500")
+        first.issue()
+        self.assertEqual(first.insurance_covered_amount, Decimal("500"))
+
+        second = self._invoice_with_line(policy, total="500")
+        second.issue()
+        # Only 200 left of the 700 limit after the first invoice claimed 500.
+        self.assertEqual(second.insurance_covered_amount, Decimal("200"))
+        self.assertEqual(second.patient_owed_amount, Decimal("300"))
+
+    def test_cancelling_frees_the_limit_for_the_next_invoice(self):
+        policy = InsurancePolicy.objects.create(
+            patient=self.patient, provider=self.provider, policy_number="P1",
+            coverage_percent=100, coverage_limit=Decimal("500"),
+        )
+        first = self._invoice_with_line(policy, total="500")
+        first.issue()
+        self.assertEqual(policy.remaining_limit, Decimal("0"))
+
+        first.cancel()  # no payments made against it yet — allowed
+        self.assertEqual(policy.remaining_limit, Decimal("500"))
+
+    def test_expired_policy_rejects_issue(self):
+        policy = InsurancePolicy.objects.create(
+            patient=self.patient, provider=self.provider, policy_number="P1",
+            coverage_percent=100, coverage_limit=Decimal("1000"),
+            valid_until=date.today() - timedelta(days=1),
+        )
+        invoice = self._invoice_with_line(policy, total="500")
+        with self.assertRaises(ValidationError):
+            invoice.issue()
+
+    def test_is_paid_reflects_only_patient_portion(self):
+        """balance_due/is_paid track patient_owed_amount, not
+        total_amount — an insurance-covered invoice must not look
+        perpetually unpaid at the register just because the insurer's
+        share was never collected as a Payment."""
+        policy = InsurancePolicy.objects.create(
+            patient=self.patient, provider=self.provider, policy_number="P1",
+            coverage_percent=80, coverage_limit=Decimal("10000"),
+        )
+        invoice = self._invoice_with_line(policy, total="1000")
+        invoice.issue()
+        Payment.objects.create(
+            invoice=invoice, branch=self.branch, received_by=self.cashier,
+            kind=PaymentKind.PAYMENT, amount=Decimal("200"),  # exactly the patient's share
+        )
+        self.assertTrue(invoice.is_paid)
+        self.assertEqual(invoice.balance_due, Decimal("0"))
+
+
+class InsuranceAPIRBACTests(TenantTestCase):
+    def setUp(self):
+        self.branch = Branch.objects.create(name="Филиал А", code="a")
+
+        manage_perm = Permission.objects.create(code="insurance.manage", category="finance")
+        view_perm = Permission.objects.create(code="insurance.view", category="finance")
+        policy_manage_perm = Permission.objects.create(code="insurance.policy.manage", category="finance")
+
+        network_admin_role = Role.objects.create(name="Администратор сети", codename="network-admin")
+        RolePermission.objects.create(role=network_admin_role, permission=manage_perm)
+
+        reception_role = Role.objects.create(name="Ресепшн", codename="receptionist")
+        RolePermission.objects.create(role=reception_role, permission=view_perm)
+        RolePermission.objects.create(role=reception_role, permission=policy_manage_perm)
+
+        cashier_role = Role.objects.create(name="Кассир", codename="cashier")
+        RolePermission.objects.create(role=cashier_role, permission=view_perm)
+
+        doctor_role = Role.objects.create(name="Врач", codename="doctor")
+
+        self.network_admin = User.objects.create(username="net_admin")
+        UserRole.objects.create(user=self.network_admin, role=network_admin_role, branch_scope=BranchScope.ALL)
+
+        self.reception = User.objects.create(username="reception")
+        UserRole.objects.create(user=self.reception, role=reception_role, branch_scope=BranchScope.OWN_BRANCH)
+        StaffBranchAssignment.objects.create(
+            staff=self.reception, branch=self.branch, weekday=Weekday.MONDAY,
+            start_time=time(8, 0), end_time=time(18, 0),
+        )
+
+        self.cashier = User.objects.create(username="cashier")
+        UserRole.objects.create(user=self.cashier, role=cashier_role, branch_scope=BranchScope.OWN_BRANCH)
+        StaffBranchAssignment.objects.create(
+            staff=self.cashier, branch=self.branch, weekday=Weekday.MONDAY,
+            start_time=time(8, 0), end_time=time(18, 0),
+        )
+
+        self.doctor = User.objects.create(username="doc")
+        UserRole.objects.create(user=self.doctor, role=doctor_role, branch_scope=BranchScope.OWN_BRANCH)
+
+        self.patient = Patient.objects.create(first_name="Тест", last_name="Пациентов")
+        self.provider = InsuranceProvider.objects.create(name="СтомСтрах", code="stomstrakh")
+        self.host = self.domain.domain
+
+    def _client_for(self, user):
+        client = APIClient()
+        client.force_authenticate(user=user)
+        return client
+
+    def test_network_admin_can_manage_provider_catalog(self):
+        client = self._client_for(self.network_admin)
+        response = client.post(
+            "/api/v1/insurance-providers/", {"name": "СтомСтрах 2", "code": "stomstrakh2"}, HTTP_HOST=self.host,
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+
+    def test_reception_cannot_manage_provider_catalog(self):
+        """Same shape as pricing.manage — a branch-scoped grant must not
+        satisfy the ALL-scope-only network catalog check, even for a
+        role that DOES manage patient-level insurance.policy.manage."""
+        client = self._client_for(self.reception)
+        response = client.post(
+            "/api/v1/insurance-providers/", {"name": "СтомСтрах 2", "code": "stomstrakh2"}, HTTP_HOST=self.host,
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_reception_can_create_policy(self):
+        client = self._client_for(self.reception)
+        response = client.post(
+            "/api/v1/insurance-policies/",
+            {
+                "patient": self.patient.pk, "provider": self.provider.pk, "policy_number": "P-100",
+                "coverage_percent": 80, "coverage_limit": "5000",
+            },
+            HTTP_HOST=self.host,
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+
+    def test_cashier_can_view_but_not_create_policy(self):
+        client = self._client_for(self.cashier)
+        list_response = client.get("/api/v1/insurance-policies/", HTTP_HOST=self.host)
+        self.assertEqual(list_response.status_code, 200)
+
+        create = client.post(
+            "/api/v1/insurance-policies/",
+            {
+                "patient": self.patient.pk, "provider": self.provider.pk, "policy_number": "P-100",
+                "coverage_percent": 80, "coverage_limit": "5000",
+            },
+            HTTP_HOST=self.host,
+        )
+        self.assertEqual(create.status_code, 403)
+
+    def test_doctor_cannot_view_policies(self):
+        client = self._client_for(self.doctor)
+        response = client.get("/api/v1/insurance-policies/", HTTP_HOST=self.host)
+        self.assertEqual(response.status_code, 403)
+
+    def test_insurance_provider_reads_are_open_to_any_authenticated_user(self):
+        client = self._client_for(self.doctor)
+        response = client.get("/api/v1/insurance-providers/", HTTP_HOST=self.host)
+        self.assertEqual(response.status_code, 200)
