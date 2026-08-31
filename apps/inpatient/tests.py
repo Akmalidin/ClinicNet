@@ -16,8 +16,9 @@ from .models import (
     Department,
     Room,
     StaffDepartmentAssignment,
+    Transfer,
 )
-from .services import admit_patient, discharge_admission
+from .services import admit_patient, discharge_admission, transfer_admission
 
 
 class DepartmentHierarchyModelTests(TenantTestCase):
@@ -412,3 +413,175 @@ class AdmissionAPIRBACTests(TenantTestCase):
         response = client.get("/api/v1/admissions/", HTTP_HOST=self.host)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 0)
+
+
+class TransferServiceTests(TenantTestCase):
+    """apps.inpatient.services.transfer_admission — the checklist's
+    "история переводов сохраняется, а не перезаписывается"."""
+
+    def setUp(self):
+        self.branch = Branch.objects.create(name="Филиал А", code="a")
+        self.dept_therapy = Department.objects.create(branch=self.branch, name="Терапия", code="therapy")
+        self.dept_surgery = Department.objects.create(branch=self.branch, name="Хирургия", code="surgery")
+        self.room_t = Room.objects.create(department=self.dept_therapy, name="204")
+        self.bed_t1 = Bed.objects.create(room=self.room_t, label="1")
+        self.bed_t2 = Bed.objects.create(room=self.room_t, label="2")
+        self.room_s = Room.objects.create(department=self.dept_surgery, name="301")
+        self.bed_s1 = Bed.objects.create(room=self.room_s, label="1")
+        self.doctor = User.objects.create(username="doc")
+        self.patient = Patient.objects.create(first_name="Тест", last_name="Пациентов")
+        self.admission = admit_patient(
+            patient=self.patient, department=self.dept_therapy, bed=self.bed_t1,
+            attending_doctor=self.doctor, admitted_by=self.doctor, diagnosis_at_admission="ОРВИ",
+        )
+
+    def test_transfer_moves_admission_and_frees_old_bed_occupies_new(self):
+        transfer_admission(
+            admission=self.admission, to_department=self.dept_surgery, to_bed=self.bed_s1,
+            transferred_by=self.doctor, reason="Осложнение, требуется операция.",
+        )
+        self.admission.refresh_from_db()
+        self.assertEqual(self.admission.department_id, self.dept_surgery.pk)
+        self.assertEqual(self.admission.bed_id, self.bed_s1.pk)
+
+        self.bed_t1.refresh_from_db()
+        self.bed_s1.refresh_from_db()
+        self.assertEqual(self.bed_t1.status, BedStatus.FREE)
+        self.assertEqual(self.bed_s1.status, BedStatus.OCCUPIED)
+
+    def test_transfer_creates_a_history_record_not_just_a_field_change(self):
+        transfer_admission(
+            admission=self.admission, to_department=self.dept_surgery, to_bed=self.bed_s1,
+            transferred_by=self.doctor, reason="Осложнение.",
+        )
+        self.assertEqual(Transfer.objects.filter(admission=self.admission).count(), 1)
+        record = Transfer.objects.get(admission=self.admission)
+        self.assertEqual(record.from_department_id, self.dept_therapy.pk)
+        self.assertEqual(record.from_bed_id, self.bed_t1.pk)
+        self.assertEqual(record.to_department_id, self.dept_surgery.pk)
+        self.assertEqual(record.to_bed_id, self.bed_s1.pk)
+
+    def test_second_transfer_adds_another_history_row_not_overwrite(self):
+        transfer_admission(
+            admission=self.admission, to_department=self.dept_surgery, to_bed=self.bed_s1,
+            transferred_by=self.doctor, reason="Операция.",
+        )
+        transfer_admission(
+            admission=self.admission, to_department=self.dept_therapy, to_bed=self.bed_t2,
+            transferred_by=self.doctor, reason="Долечивание.",
+        )
+        self.assertEqual(Transfer.objects.filter(admission=self.admission).count(), 2)
+        self.admission.refresh_from_db()
+        self.assertEqual(self.admission.bed_id, self.bed_t2.pk)
+
+    def test_transfer_rejects_an_occupied_target_bed(self):
+        other_patient = Patient.objects.create(first_name="Второй", last_name="Пациентов")
+        admit_patient(
+            patient=other_patient, department=self.dept_surgery, bed=self.bed_s1,
+            attending_doctor=self.doctor, admitted_by=self.doctor, diagnosis_at_admission="Другое",
+        )
+        with self.assertRaises(ValidationError):
+            transfer_admission(
+                admission=self.admission, to_department=self.dept_surgery, to_bed=self.bed_s1,
+                transferred_by=self.doctor,
+            )
+        # Nothing moved — original bed still occupied by the original admission.
+        self.admission.refresh_from_db()
+        self.assertEqual(self.admission.bed_id, self.bed_t1.pk)
+
+    def test_transfer_rejects_bed_not_belonging_to_target_department(self):
+        with self.assertRaises(ValidationError):
+            transfer_admission(
+                admission=self.admission, to_department=self.dept_surgery, to_bed=self.bed_t2,
+                transferred_by=self.doctor,
+            )
+
+    def test_transfer_rejects_discharged_admission(self):
+        discharge_admission(self.admission)
+        with self.assertRaises(ValidationError):
+            transfer_admission(
+                admission=self.admission, to_department=self.dept_surgery, to_bed=self.bed_s1,
+                transferred_by=self.doctor,
+            )
+
+
+class TransferAPIRBACTests(TenantTestCase):
+    def setUp(self):
+        self.branch = Branch.objects.create(name="Филиал А", code="a")
+        self.dept_therapy = Department.objects.create(branch=self.branch, name="Терапия", code="therapy")
+        self.dept_surgery = Department.objects.create(branch=self.branch, name="Хирургия", code="surgery")
+        self.room_t = Room.objects.create(department=self.dept_therapy, name="204")
+        self.bed_t1 = Bed.objects.create(room=self.room_t, label="1")
+        self.room_s = Room.objects.create(department=self.dept_surgery, name="301")
+        self.bed_s1 = Bed.objects.create(room=self.room_s, label="1")
+        self.patient = Patient.objects.create(first_name="Тест", last_name="Пациентов")
+
+        view_perm = Permission.objects.create(code="inpatient.admission.view", category="inpatient")
+        manage_perm = Permission.objects.create(code="inpatient.admission.manage", category="inpatient")
+        doctor_role = Role.objects.create(name="Врач", codename="doctor")
+        RolePermission.objects.create(role=doctor_role, permission=view_perm)
+        RolePermission.objects.create(role=doctor_role, permission=manage_perm)
+
+        nurse_role = Role.objects.create(name="Постовая медсестра", codename="nurse")
+        RolePermission.objects.create(role=nurse_role, permission=view_perm)
+
+        self.doctor = User.objects.create(username="doc")
+        UserRole.objects.create(user=self.doctor, role=doctor_role, branch_scope=BranchScope.OWN_BRANCH)
+        StaffBranchAssignment.objects.create(
+            staff=self.doctor, branch=self.branch, weekday=Weekday.MONDAY,
+            start_time=time(9, 0), end_time=time(18, 0),
+        )
+
+        self.nurse_therapy = User.objects.create(username="nurse_therapy")
+        UserRole.objects.create(
+            user=self.nurse_therapy, role=nurse_role, branch_scope=BranchScope.SPECIFIC_BRANCHES
+        )
+        StaffDepartmentAssignment.objects.create(staff=self.nurse_therapy, department=self.dept_therapy)
+
+        self.admission = admit_patient(
+            patient=self.patient, department=self.dept_therapy, bed=self.bed_t1,
+            attending_doctor=self.doctor, admitted_by=self.doctor, diagnosis_at_admission="ОРВИ",
+        )
+        self.host = self.domain.domain
+
+    def _client_for(self, user):
+        client = APIClient()
+        client.force_authenticate(user=user)
+        return client
+
+    def test_doctor_transfers_via_api(self):
+        client = self._client_for(self.doctor)
+        response = client.post(
+            f"/api/v1/admissions/{self.admission.pk}/transfer/",
+            {"to_department": self.dept_surgery.pk, "to_bed": self.bed_s1.pk, "reason": "Операция."},
+            HTTP_HOST=self.host,
+        )
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["department"], self.dept_surgery.pk)
+        self.bed_t1.refresh_from_db()
+        self.bed_s1.refresh_from_db()
+        self.assertEqual(self.bed_t1.status, BedStatus.FREE)
+        self.assertEqual(self.bed_s1.status, BedStatus.OCCUPIED)
+
+    def test_nurse_without_manage_permission_cannot_transfer(self):
+        client = self._client_for(self.nurse_therapy)
+        response = client.post(
+            f"/api/v1/admissions/{self.admission.pk}/transfer/",
+            {"to_department": self.dept_surgery.pk, "to_bed": self.bed_s1.pk},
+            HTTP_HOST=self.host,
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_nurse_sees_transfer_history_for_her_department_even_after_patient_leaves(self):
+        client_doctor = self._client_for(self.doctor)
+        client_doctor.post(
+            f"/api/v1/admissions/{self.admission.pk}/transfer/",
+            {"to_department": self.dept_surgery.pk, "to_bed": self.bed_s1.pk, "reason": "Операция."},
+            HTTP_HOST=self.host,
+        )
+        client_nurse = self._client_for(self.nurse_therapy)
+        response = client_nurse.get("/api/v1/transfers/", HTTP_HOST=self.host)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["from_department"], self.dept_therapy.pk)
+        self.assertEqual(response.data[0]["to_department"], self.dept_surgery.pk)

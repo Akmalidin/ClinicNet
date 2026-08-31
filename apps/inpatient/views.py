@@ -1,4 +1,5 @@
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db.models import Q
 from rest_framework import serializers as drf_serializers
 from rest_framework import viewsets
 from rest_framework.decorators import action
@@ -9,7 +10,7 @@ from apps.accounts.permissions import HasBranchPermission
 from apps.accounts.rbac import branches_for_permission
 from apps.patients.models import Patient
 
-from .models import Admission, AdmissionStatus, Bed, BedStatus, Department, Room, StaffDepartmentAssignment
+from .models import Admission, AdmissionStatus, Bed, BedStatus, Department, Room, StaffDepartmentAssignment, Transfer
 from .permissions import HasDepartmentPermission
 from .rbac import departments_for_permission
 from .serializers import (
@@ -18,8 +19,9 @@ from .serializers import (
     DepartmentSerializer,
     RoomSerializer,
     StaffDepartmentAssignmentSerializer,
+    TransferSerializer,
 )
-from .services import admit_patient, discharge_admission
+from .services import admit_patient, discharge_admission, transfer_admission
 
 
 def _validation_detail(exc: DjangoValidationError):
@@ -208,3 +210,56 @@ class AdmissionViewSet(viewsets.ModelViewSet):
             return Response({"detail": "Пациент уже выписан."}, status=400)
         discharge_admission(admission, epicrisis=request.data.get("discharge_epicrisis", ""))
         return Response(self.get_serializer(admission).data)
+
+    @action(detail=True, methods=["post"])
+    def transfer(self, request, pk=None):
+        """Перевод — get_object() already confirmed the caller can act on
+        the admission's CURRENT (source) department; the destination
+        department is checked separately below, since a department-scoped
+        actor (department-head/nurse) shouldn't be able to move a patient
+        into a department they have no standing in either — a doctor/
+        branch-admin with own_branch reach passes this trivially, same as
+        the source check."""
+        admission = self.get_object()
+
+        try:
+            to_department = Department.objects.get(pk=request.data.get("to_department"))
+            to_bed = Bed.objects.get(pk=request.data.get("to_bed"))
+        except (Department.DoesNotExist, Bed.DoesNotExist, TypeError, ValueError):
+            return Response({"detail": "Некорректные ссылки на отделение/койку назначения."}, status=400)
+
+        self.check_object_permissions(request, to_department)
+
+        try:
+            transfer_admission(
+                admission=admission,
+                to_department=to_department,
+                to_bed=to_bed,
+                transferred_by=request.user,
+                reason=request.data.get("reason", ""),
+            )
+        except DjangoValidationError as exc:
+            raise drf_serializers.ValidationError(_validation_detail(exc))
+
+        admission.refresh_from_db()
+        return Response(self.get_serializer(admission).data)
+
+
+class TransferViewSet(viewsets.ReadOnlyModelViewSet):
+    """Append-only перевод-лог — read-only, created only by
+    AdmissionViewSet.transfer (apps.inpatient.services.transfer_admission),
+    same shape as PaymentViewSet/StockMovementViewSet."""
+
+    serializer_class = TransferSerializer
+    permission_classes = [HasDepartmentPermission]
+    required_permission = {"GET": "inpatient.admission.view"}
+    filterset_fields = ["admission", "from_department", "to_department"]
+
+    def get_queryset(self):
+        allowed_departments = departments_for_permission(self.request.user, "inpatient.admission.view")
+        # Both directions — a nurse who was in the FROM department should
+        # still see the historic record of a patient who left it, not
+        # only rows currently resolving to a department she's in now.
+        return Transfer.objects.filter(
+            Q(from_department__in=allowed_departments) | Q(to_department__in=allowed_departments)
+        ).select_related("admission", "from_department", "from_bed", "to_department", "to_bed", "transferred_by")
