@@ -287,6 +287,72 @@ class MeReferralBranchesTests(TenantTestCase):
         )
 
 
+class MeTriageBranchesTests(TenantTestCase):
+    """MeView's triage_branches — same convention as referral_branches
+    above, this is what TriageQueueWidget.vue's client-side branch guard
+    verifies each row against (Фаза 5, под-модуль 2 frontend)."""
+
+    def setUp(self):
+        self.branch_a = Branch.objects.create(name="Филиал А", code="a")
+        self.branch_b = Branch.objects.create(name="Филиал Б", code="b")
+
+        view_perm = Permission.objects.create(code="triage.view", category="triage")
+        manage_perm = Permission.objects.create(code="triage.manage", category="triage")
+
+        plain_doctor_role = Role.objects.create(name="Врач", codename="doctor")
+        # No triage.view/manage — matches the real seed_rbac.
+
+        coordinator_role = Role.objects.create(name="Координатор филиала", codename="branch-admin")
+        RolePermission.objects.create(role=coordinator_role, permission=view_perm)
+        RolePermission.objects.create(role=coordinator_role, permission=manage_perm)
+
+        network_admin_role = Role.objects.create(name="Администратор сети", codename="network-admin")
+        RolePermission.objects.create(role=network_admin_role, permission=view_perm)
+
+        self.plain_doctor = User.objects.create(username="plain_doc2")
+        UserRole.objects.create(user=self.plain_doctor, role=plain_doctor_role, branch_scope=BranchScope.OWN_BRANCH)
+        StaffBranchAssignment.objects.create(
+            staff=self.plain_doctor, branch=self.branch_a, weekday=Weekday.MONDAY,
+            start_time=time(9, 0), end_time=time(17, 0),
+        )
+
+        self.coordinator = User.objects.create(username="coordinator2")
+        UserRole.objects.create(
+            user=self.coordinator, role=coordinator_role, branch_scope=BranchScope.OWN_BRANCH
+        )
+        StaffBranchAssignment.objects.create(
+            staff=self.coordinator, branch=self.branch_a, weekday=Weekday.MONDAY,
+            start_time=time(9, 0), end_time=time(17, 0),
+        )
+
+        self.network_admin = User.objects.create(username="net_admin2")
+        UserRole.objects.create(user=self.network_admin, role=network_admin_role, branch_scope=BranchScope.ALL)
+
+        self.tenant_host = self.domain.domain
+
+    def _me(self, user):
+        client = APIClient()
+        client.force_authenticate(user=user)
+        return client.get("/api/v1/me/", HTTP_HOST=self.tenant_host)
+
+    def test_plain_doctor_has_no_triage_branches(self):
+        response = self._me(self.plain_doctor)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["triage_branches"], [])
+
+    def test_coordinator_sees_only_their_own_branch(self):
+        response = self._me(self.coordinator)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["triage_branches"], [self.branch_a.pk])
+
+    def test_network_admin_sees_every_branch(self):
+        response = self._me(self.network_admin)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            set(response.json()["triage_branches"]), {self.branch_a.pk, self.branch_b.pk}
+        )
+
+
 class UsersWithPermissionTests(TenantTestCase):
     """Reverse lookup used by apps.referrals' escalate_stale_referrals:
     given a branch, who holds this permission there?"""

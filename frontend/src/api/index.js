@@ -61,6 +61,12 @@ export const referralsApi = {
   complete: (id, outcomeNote) => client.post(`referrals/${id}/complete/`, { outcome_note: outcomeNote }),
 }
 
+export const triageApi = {
+  list: (params) => client.get('triage-suggestions/', { params }),
+  confirm: (id, patientId) => client.post(`triage-suggestions/${id}/confirm/`, { patient: patientId }),
+  reject: (id, reason) => client.post(`triage-suggestions/${id}/reject/`, { reason }),
+}
+
 export const notificationsApi = {
   list: (params) => client.get('notifications/', { params }),
   markRead: (id) => client.patch(`notifications/${id}/`, { is_read: true }),

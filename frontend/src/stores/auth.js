@@ -16,6 +16,14 @@ export const useAuthStore = defineStore('auth', {
     // independent fetch, never a trust of whatever the referrals list
     // endpoint already returned.
     referralBranches: [],
+    // triage_branches: [id, ...] — same convention as referralBranches,
+    // computed server-side by rbac.branches_for_permission() over
+    // triage.view/triage.manage (see MeView). TriageQueueWidget.vue's
+    // client-side branch guard re-checks each row against this, and
+    // DashboardPage.vue uses it to decide whether to render the widget
+    // at all — a user without triage.view shouldn't even fetch the
+    // triage-suggestions endpoint (it'd just 403).
+    triageBranches: [],
     ready: false,
   }),
   getters: {
@@ -32,12 +40,14 @@ export const useAuthStore = defineStore('auth', {
       this.user = null
       this.roles = []
       this.referralBranches = []
+      this.triageBranches = []
     },
     async fetchMe() {
       const { data } = await meApi.get()
       this.user = data
       this.roles = data.roles ?? []
       this.referralBranches = data.referral_branches ?? []
+      this.triageBranches = data.triage_branches ?? []
     },
     // Called once on app boot: a stored access token doesn't mean it's
     // still valid, so this round-trips through /me/ (the request

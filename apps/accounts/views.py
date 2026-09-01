@@ -44,6 +44,13 @@ class MeView(APIView):
             set(branches_for_permission(user, "referrals.view").values_list("id", flat=True))
             | set(branches_for_permission(user, "referrals.manage").values_list("id", flat=True))
         )
+        # Same precomputed-branch-list convention as referral_branches
+        # above — this is what TriageQueueWidget.vue's client-side branch
+        # guard verifies each row against (Фаза 5, под-модуль 2 frontend).
+        data["triage_branches"] = sorted(
+            set(branches_for_permission(user, "triage.view").values_list("id", flat=True))
+            | set(branches_for_permission(user, "triage.manage").values_list("id", flat=True))
+        )
         return Response(data)
 
 

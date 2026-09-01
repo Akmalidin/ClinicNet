@@ -4,6 +4,7 @@ import { RouterLink, useRouter } from 'vue-router'
 
 import { branchesApi, patientsApi } from '../api'
 import ReferralQueueWidget from '../components/referrals/ReferralQueueWidget.vue'
+import TriageQueueWidget from '../components/triage/TriageQueueWidget.vue'
 import { useAuthStore } from '../stores/auth'
 
 const auth = useAuthStore()
@@ -96,6 +97,17 @@ onMounted(() => {
              referral_branches (+ "own") actually cover. Same widget on a
              branch dashboard would pass :branch="currentBranchId". -->
         <ReferralQueueWidget />
+      </section>
+
+      <section v-if="auth.triageBranches.length">
+        <!-- Guarded on the client, not just left to render an empty
+             queue: a user without triage.view anywhere shouldn't even
+             fire GET /triage-suggestions/ (it would just come back 403) —
+             same requirement as ReferralQueueWidget, made explicit for
+             this one because the AI-триаж manual test checklist calls
+             it out directly (frontend prompt, "RBAC" section). -->
+        <h2 class="text-sm font-medium text-gray-500 mb-2">Очередь AI-триажа (сеть)</h2>
+        <TriageQueueWidget />
       </section>
     </main>
   </div>
