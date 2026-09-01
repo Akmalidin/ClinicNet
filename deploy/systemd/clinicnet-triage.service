@@ -1,0 +1,17 @@
+[Unit]
+Description=ClinicNet AI-триаж (FastAPI, Telegram long-polling)
+After=network.target clinicnet.service
+Wants=clinicnet.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/clinicnet
+EnvironmentFile=/var/www/clinicnet/triage_service/.env
+ExecStart=/var/www/clinicnet/triage_venv/bin/uvicorn triage_service.main:app --host 127.0.0.1 --port 8100
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

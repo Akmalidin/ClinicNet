@@ -45,6 +45,9 @@ PERMISSIONS = [
     ("inpatient.operation.checklist", "inpatient", "Подтверждение этапов чек-листа безопасности хирургии"),
     ("churn.view", "churn", "Просмотр алертов оттока пациентов своего филиала"),
     ("churn.manage", "churn", "Обработка алерта оттока (принять/отклонить/вернуть в работу)"),
+    ("triage.view", "triage", "Просмотр очереди предложений AI-триажа своего филиала"),
+    ("triage.manage", "triage", "Подтверждение/отклонение предложения AI-триажа"),
+    ("triage.ingest", "triage", "Создание предложения AI-триажа (только сервисный аккаунт бота)"),
 ]
 
 # codename -> (name, is_system, branch-agnostic description, permission codes)
@@ -113,6 +116,8 @@ ROLES = {
             "inpatient.operation.checklist",
             "churn.view",
             "churn.manage",
+            "triage.view",
+            "triage.manage",
         ],
     },
     "doctor": {
@@ -187,6 +192,11 @@ ROLES = {
             # не выдан — это не клиническая, а операционная задача.
             "churn.view",
             "churn.manage",
+            # Та же роль подтверждает предложения AI-триажа (Фаза 5
+            # под-модуль 2) — координатор подтверждает, не бот бронирует
+            # напрямую (см. TriageSuggestion.confirm's докстринг).
+            "triage.view",
+            "triage.manage",
         ],
     },
     "cashier": {
@@ -260,6 +270,21 @@ ROLES = {
         # from StaffDepartmentAssignment. inpatient.admission.manage
         # (admit/discharge) is deliberately NOT granted — that's a
         # doctor/department-head decision.
+    },
+    "triage-bot": {
+        "name": "AI-триаж бот (сервисный аккаунт)",
+        "is_system": True,
+        "permissions": [
+            # Только ingest — сам бот НИЧЕГО не бронирует и не видит
+            # очередь координатора, только создаёт предложения (см.
+            # apps.triage.models.TriageSuggestion.confirm's докстринг:
+            # "координатор только подтверждает"). Не человек — не
+            # выдаётся штатным пользователям, только выделенному
+            # UserRole сервисного аккаунта, обычно с branch_scope=ALL
+            # (бот не привязан к одному филиалу, предлагает слот там,
+            # где ближе — см. apps.triage.views.TriageSuggestionViewSet).
+            "triage.ingest",
+        ],
     },
 }
 
