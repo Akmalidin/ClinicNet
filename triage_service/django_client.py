@@ -83,13 +83,16 @@ class DjangoClient:
         rather than reimplementing the free/busy calculation, per the
         Phase 5 prompt's explicit instruction.
 
-        available_slots (Phase 2) computes a day's shift window purely
-        from weekday/hours — it does NOT know "now", so querying TODAY
-        can hand back a slot that's already elapsed (caught live: a
-        9:00-17:00 shift queried at 19:00 the same day returned this
-        morning's 9:00 slot as "available"). Filtered out here instead
-        of touching the Phase 2 endpoint, which other callers (the
-        referral UI) rely on behaving exactly as it does today.
+        available_slots itself now also filters out already-elapsed slots
+        (fixed at the source after this PR shipped — the endpoint used to
+        compute a day's shift window purely from weekday/hours with no
+        notion of "now", caught live here, but it's a real bug for EVERY
+        caller of that endpoint, not just this one, so the fix belongs
+        there, not in this client — see apps.referrals.views.
+        ReferralViewSet.available_slots). This filter stays anyway, as
+        defense-in-depth against clock skew between this service and
+        Django, and so this method doesn't quietly regress if the source
+        fix is ever reverted.
         """
         doctors = await self.list_doctors(specialty_code)
         now = datetime.now(timezone.utc)
