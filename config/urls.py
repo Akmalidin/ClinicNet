@@ -16,4 +16,5 @@ urlpatterns = [
     path("api/v1/", include("apps.inventory.urls")),
     path("api/v1/", include("apps.inpatient.urls")),
     path("api/v1/", include("apps.churn.urls")),
+    path("api/v1/", include("apps.triage.urls")),
 ]

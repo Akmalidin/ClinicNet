@@ -113,6 +113,46 @@ UserRole.objects.create(user=u, role=role, branch_scope=BranchScope.ALL)
 exit()
 ```
 
+## 7. AI-триаж (Фаза 5, под-модуль 2) — отдельный сервис
+
+`triage_service/` — не Django-приложение, отдельный FastAPI-процесс, своё
+окружение, свой systemd-юнит. Подробности — `triage_service/README.md` и
+`docs/PHASE5-TRIAGE-DESIGN.md`.
+
+**Сервисный аккаунт бота** (роль `triage-bot`, только `triage.ingest`,
+`branch_scope=ALL` — бот не привязан к одному филиалу):
+
+```bash
+cd /var/www/clinicnet
+sudo -u www-data venv/bin/python manage.py tenant_command shell --schema=clinicnet
+```
+
+```python
+from apps.accounts.models import User, Role, UserRole, BranchScope
+bot = User.objects.create_user(username="triage_bot_service", password="<сгенерировать длинный пароль>")
+role = Role.objects.get(codename="triage-bot")
+UserRole.objects.create(user=bot, role=role, branch_scope=BranchScope.ALL)
+exit()
+```
+
+**Установка и запуск** (отдельное окружение — `requirements.txt` сервиса
+короче и не пересекается с Django-зависимостями):
+
+```bash
+cd /var/www/clinicnet/triage_service
+sudo -u www-data python3 -m venv /var/www/clinicnet/triage_venv
+sudo -u www-data /var/www/clinicnet/triage_venv/bin/pip install -r requirements.txt
+sudo -u www-data cp .env.example .env
+sudo -u www-data $EDITOR .env   # TELEGRAM_BOT_TOKEN, DJANGO_SERVICE_PASSWORD (пароль из шага выше), и т.д.
+sudo chmod 600 .env
+
+cp /var/www/clinicnet/deploy/systemd/clinicnet-triage.service /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now clinicnet-triage
+systemctl status clinicnet-triage   # active (running)
+curl -s http://127.0.0.1:8100/health   # {"status":"ok","polling":true}
+```
+
 ## Обновления
 
 ```bash
@@ -124,6 +164,10 @@ sudo -u www-data venv/bin/python manage.py migrate_schemas --shared --noinput
 sudo -u www-data venv/bin/python manage.py migrate_schemas --schema=clinicnet
 sudo -u www-data venv/bin/python manage.py tenant_command seed_rbac --schema=clinicnet
 systemctl restart clinicnet
+
+# Если менялся triage_service/ (не при каждом обновлении):
+sudo -u www-data /var/www/clinicnet/triage_venv/bin/pip install -r triage_service/requirements.txt
+systemctl restart clinicnet-triage
 ```
 
 `seed_rbac` идемпотентна — безопасно гонять её при каждом обновлении, а
