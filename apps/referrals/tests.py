@@ -1,4 +1,5 @@
 from datetime import time, timedelta
+from unittest.mock import patch
 
 from django.core.exceptions import ValidationError
 from django.utils import timezone
@@ -343,6 +344,32 @@ class ReferralAPITests(TenantTestCase):
         self.assertTrue(len(slots) > 0)
         starts = {s["starts_at"] for s in slots}
         self.assertFalse(any("10:00:00" in s for s in starts))  # busy slot excluded
+
+    def test_available_slots_excludes_already_passed_slots_today(self):
+        """Regression: found live while building Фаза 5's triage_service
+        (apps.triage) — querying `date`=today after the shift has already
+        started returned this morning's slots as "available". branch_b
+        (to_doctor's branch) defaults to UTC, so mocking timezone.now()
+        needs no offset math."""
+        next_monday = timezone.localdate()
+        while next_monday.weekday() != 0:
+            next_monday += timedelta(days=1)
+        mid_shift = timezone.make_aware(timezone.datetime.combine(next_monday, time(11, 0)))
+
+        client = self._client_for(self.from_doctor)
+        with patch("apps.referrals.views.timezone.now", return_value=mid_shift):
+            response = client.get(
+                "/api/v1/referrals/available_slots/",
+                {"doctor": self.to_doctor.pk, "date": next_monday.isoformat()},
+                HTTP_HOST=self.host,
+            )
+        self.assertEqual(response.status_code, 200, response.data)
+        starts = {s["starts_at"] for s in response.json()}
+        # Shift is 9:00-17:00 — everything at/before 11:00 must be gone,
+        # everything after must still be offered.
+        self.assertFalse(any(t in s for s in starts for t in ("09:00:00", "09:30:00", "10:00:00", "10:30:00", "11:00:00")))
+        self.assertTrue(any("11:30:00" in s for s in starts))
+        self.assertTrue(any("16:30:00" in s for s in starts))
 
     def test_completed_referral_cannot_be_reopened(self):
         """Manual-check item 4: a terminal (COMPLETED/DECLINED) referral is

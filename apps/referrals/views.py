@@ -152,7 +152,16 @@ class ReferralViewSet(viewsets.ModelViewSet):
         """Свободные окна врача на дату — считаем сами (в проекте нет
         готового источника "свободных слотов" для проксирования): смены
         StaffBranchAssignment на день недели этой даты, минус занятые
-        активные Appointment в этот день."""
+        активные Appointment в этот день, минус уже прошедшее время,
+        если date — сегодня.
+
+        Уже прошедшее время исключается явно (found live while building
+        Фаза 5's triage_service — apps.triage's find_nearest_slot ловил
+        сегодняшние окна, которые фактически уже наступили и прошли,
+        потому что эта проверка изначально жила только в клиенте
+        triage_service, а не здесь; у любого вызывающего этого эндпоинта
+        нет причины хотеть прошедшее время как "свободное", так что фикс
+        — здесь, в первоисточнике, а не в одном из потребителей)."""
         doctor_id = request.query_params.get("doctor")
         date_str = request.query_params.get("date")
         if not doctor_id or not date_str:
@@ -170,6 +179,7 @@ class ReferralViewSet(viewsets.ModelViewSet):
                 doctor=doctor, status__in=ACTIVE_STATUSES, starts_at__date=date
             ).values_list("starts_at", "ends_at")
         )
+        now = timezone.now()
 
         slots = []
         for shift in shifts:
@@ -178,7 +188,7 @@ class ReferralViewSet(viewsets.ModelViewSet):
             shift_end = datetime.combine(date, shift.end_time, tzinfo=tz)
             while cursor + timedelta(minutes=SLOT_MINUTES) <= shift_end:
                 slot_end = cursor + timedelta(minutes=SLOT_MINUTES)
-                if not any(b_start < slot_end and b_end > cursor for b_start, b_end in busy):
+                if cursor > now and not any(b_start < slot_end and b_end > cursor for b_start, b_end in busy):
                     slots.append(
                         {
                             "branch": shift.branch_id,
