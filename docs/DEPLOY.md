@@ -60,6 +60,17 @@ sudo apt-get install -y nodejs
 node -v && npm -v   # v20.x / 10.x
 ```
 
+`www-data`'s home directory resolves to `/var/www` (Debian default), so
+`sudo -u www-data npm ci` puts its cache at `/var/www/.npm` — but only
+`/var/www/clinicnet` was chowned to `www-data` above, not `/var/www`
+itself, so `www-data` can't create that directory on its own. Create it
+once, as root, before the first build ever run on this server:
+
+```bash
+sudo mkdir -p /var/www/.npm
+sudo chown -R 33:33 /var/www/.npm   # 33 = www-data's uid/gid on Debian/Ubuntu
+```
+
 ```bash
 cd /var/www/clinicnet/frontend
 sudo -u www-data npm ci
