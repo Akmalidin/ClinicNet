@@ -46,6 +46,7 @@ class AppointmentSerializer(serializers.ModelSerializer):
         return {
             "id": referral.id,
             "reason": referral.reason,
+            "priority": referral.priority,
             "from_doctor_name": str(referral.from_doctor),
         }
 

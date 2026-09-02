@@ -124,7 +124,10 @@ class AppointmentReferralFieldAPITests(TenantTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
             response.json()["referral"],
-            {"id": referral.id, "reason": "Ортодонтическая консультация", "from_doctor_name": "Иван Иванов"},
+            {
+                "id": referral.id, "reason": "Ортодонтическая консультация",
+                "priority": "routine", "from_doctor_name": "Иван Иванов",
+            },
         )
 
     def test_walk_in_appointment_has_null_referral(self):
@@ -135,3 +138,55 @@ class AppointmentReferralFieldAPITests(TenantTestCase):
         response = self.client_api.get(f"/api/v1/appointments/{appointment.pk}/", HTTP_HOST=self.host)
         self.assertEqual(response.status_code, 200)
         self.assertIsNone(response.json()["referral"])
+
+
+class AppointmentDateFilterAPITests(TenantTestCase):
+    """?date=YYYY-MM-DD — найдено при разведке multibranchschedule.html:
+    расписание по сети на один день (см. AppointmentViewSet.get_queryset)."""
+
+    def setUp(self):
+        self.branch = Branch.objects.create(name="Филиал", code="a")
+        view_perm = Permission.objects.create(code="appointment.view", category="scheduling")
+        role = Role.objects.create(name="Врач", codename="doctor")
+        RolePermission.objects.create(role=role, permission=view_perm)
+
+        self.doctor = User.objects.create(username="doc")
+        self.viewer = User.objects.create(username="viewer")
+        UserRole.objects.create(user=self.viewer, role=role, branch_scope=BranchScope.ALL)
+        self.patient = Patient.objects.create(first_name="Тест", last_name="Пациентов")
+
+        self.client_api = APIClient()
+        self.client_api.force_authenticate(user=self.viewer)
+        self.host = self.domain.domain
+
+        today = timezone.now().replace(hour=10, minute=0, second=0, microsecond=0) + timedelta(days=1)
+        tomorrow = today + timedelta(days=1)
+        self.today = today
+        self.tomorrow_appt = Appointment.objects.create(
+            branch=self.branch, patient=self.patient, doctor=self.doctor,
+            starts_at=tomorrow, ends_at=tomorrow + timedelta(minutes=30),
+        )
+        self.today_appt = Appointment.objects.create(
+            branch=self.branch, patient=self.patient, doctor=self.doctor,
+            starts_at=today, ends_at=today + timedelta(minutes=30),
+        )
+
+    def test_date_filter_returns_only_that_days_appointments(self):
+        response = self.client_api.get(
+            "/api/v1/appointments/", {"date": self.today.date().isoformat()}, HTTP_HOST=self.host,
+        )
+        self.assertEqual(response.status_code, 200)
+        ids = {row["id"] for row in response.json()}
+        self.assertEqual(ids, {self.today_appt.pk})
+
+    def test_no_date_param_returns_everything(self):
+        response = self.client_api.get("/api/v1/appointments/", HTTP_HOST=self.host)
+        self.assertEqual(response.status_code, 200)
+        ids = {row["id"] for row in response.json()}
+        self.assertEqual(ids, {self.today_appt.pk, self.tomorrow_appt.pk})
+
+    def test_malformed_date_is_ignored_not_500(self):
+        response = self.client_api.get("/api/v1/appointments/", {"date": "not-a-date"}, HTTP_HOST=self.host)
+        self.assertEqual(response.status_code, 200)
+        ids = {row["id"] for row in response.json()}
+        self.assertEqual(ids, {self.today_appt.pk, self.tomorrow_appt.pk})

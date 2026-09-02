@@ -37,6 +37,10 @@ export const appointmentsApi = {
   // Used by ReferralQueueWidget's "Забронировать" action: books the actual
   // calendar slot, then referralsApi.schedule() links it to the referral.
   create: (data) => client.post('appointments/', data),
+  // params can include branch/doctor/patient/status (exact-match) and
+  // date (YYYY-MM-DD, whole-day filter — see AppointmentViewSet.
+  // get_queryset) — used by MultiBranchSchedulePage.vue for a single
+  // network-wide day.
   list: (params) => client.get('appointments/', { params }),
 }
 

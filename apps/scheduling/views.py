@@ -1,5 +1,7 @@
 from rest_framework import viewsets
 
+from django.utils.dateparse import parse_date
+
 from apps.accounts.permissions import HasBranchPermission
 from apps.accounts.rbac import branches_for_permission
 
@@ -29,7 +31,20 @@ class AppointmentViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         code = self.required_permission.get(self.request.method, "appointment.view")
         allowed_branches = branches_for_permission(self.request.user, code)
-        return (
+        qs = (
             Appointment.objects.filter(branch__in=allowed_branches)
             .select_related("branch", "patient", "doctor", "referral", "referral__from_doctor")
         )
+        # ?date=YYYY-MM-DD — найдено при разведке multibranchschedule.html:
+        # расписание по СЕТИ на один день не вытянуть иначе (filterset_
+        # fields — только exact-match, starts_at там нет и точное
+        # совпадение с datetime всё равно бесполезно). Единственный
+        # календарный фильтр, который сейчас реально нужен клиенту, —
+        # день целиком; диапазон/gte-lte не добавляем, пока нет
+        # экрана, которому он нужен.
+        date_param = self.request.query_params.get("date")
+        if date_param:
+            parsed = parse_date(date_param)
+            if parsed:
+                qs = qs.filter(starts_at__date=parsed)
+        return qs
