@@ -33,11 +33,41 @@ sudo -u postgres psql -c "CREATE DATABASE clinicnet OWNER clinicnet;"
 
 ## 3. Приложение
 
+Репозиторий приватный — обычный `git clone`/`git pull` по HTTPS без
+креда падает 401 (GitHub с 2021 года не принимает пароль аккаунта для
+git, только токен/ключ). Вместо токена в URL — **Deploy Key** (SSH,
+read-only, привязанный к этому конкретному репозиторию, не к аккаунту
+целиком): ключ живёт только на сервере, приватная часть никуда не
+уходит.
+
+`www-data`'s `$HOME` — это `/var/www` (дефолт Debian), который сам
+`www-data` не может писать (см. ниже про npm-кэш — та же причина), так
+что ключ и known_hosts кладём не в дефолтное `~/.ssh`, а внутрь
+`/var/www/clinicnet` (её ниже создаём и чауним первой), и указываем
+git путь к нему явно (`core.sshCommand`), а не полагаемся на дефолтный
+`~/.ssh/config`.
+
 ```bash
 mkdir -p /var/www/clinicnet
 chown www-data:www-data /var/www/clinicnet
+
+sudo -u www-data mkdir -p /var/www/clinicnet/.ssh
+sudo -u www-data ssh-keygen -t ed25519 -f /var/www/clinicnet/.ssh/github_deploy_key -N "" -C "clinicnet-prod-deploy"
+sudo -u www-data ssh-keyscan -t ed25519 github.com >> /var/www/clinicnet/.ssh/known_hosts
+chmod 600 /var/www/clinicnet/.ssh/github_deploy_key
+cat /var/www/clinicnet/.ssh/github_deploy_key.pub
+```
+
+Вставить вывод последней команды: репозиторий `Akmalidin/ClinicNet` →
+Settings → Deploy keys → Add deploy key (например, title
+`clinicnet-prod-server`). **"Allow write access" оставить
+выключенным** — серверу нужно только `git pull`, не push.
+
+```bash
 cd /var/www/clinicnet
-sudo -u www-data git clone https://github.com/Akmalidin/ClinicNet.git .
+GIT_SSH_COMMAND="ssh -i /var/www/clinicnet/.ssh/github_deploy_key -o UserKnownHostsFile=/var/www/clinicnet/.ssh/known_hosts -o IdentitiesOnly=yes"
+sudo -u www-data env GIT_SSH_COMMAND="$GIT_SSH_COMMAND" git clone git@github.com:Akmalidin/ClinicNet.git .
+sudo -u www-data git config core.sshCommand "$GIT_SSH_COMMAND"   # чтобы дальнейшие pull/fetch не требовали переменную заново
 sudo -u www-data git checkout claude/odontis-enterprise-phased-plan-tal1n4   # до мержа PR #19 в main
 sudo -u www-data python3 -m venv venv
 sudo -u www-data venv/bin/pip install -r requirements.txt
