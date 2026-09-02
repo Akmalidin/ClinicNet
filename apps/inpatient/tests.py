@@ -490,6 +490,33 @@ class AdmissionAPIRBACTests(TenantTestCase):
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual({row["id"] for row in response.data}, {self.dept_therapy.pk})
 
+    def test_bed_board_shows_occupied_beds_with_the_real_patient(self):
+        """.view-gated (nurse holds it, unlike .manage above) — the board
+        is for anyone who can see admissions, not only who can create one."""
+        admit_patient(
+            patient=self.patient, department=self.dept_therapy, bed=self.bed_therapy,
+            attending_doctor=self.doctor, admitted_by=self.doctor, diagnosis_at_admission="ОРВИ",
+        )
+        client = self._client_for(self.nurse)
+        response = client.get("/api/v1/admissions/bed_board/", HTTP_HOST=self.host)
+        self.assertEqual(response.status_code, 200, response.data)
+        dept_row = next(row for row in response.data["departments"] if row["id"] == self.dept_therapy.pk)
+        self.assertEqual(len(dept_row["rooms"]), 1)
+        bed_row = next(b for b in dept_row["rooms"][0]["beds"] if b["id"] == self.bed_therapy.pk)
+        self.assertEqual(bed_row["status"], BedStatus.OCCUPIED)
+        self.assertEqual(bed_row["patient_name"], str(self.patient))
+        self.assertEqual(response.data["occupancy"][BedStatus.OCCUPIED], 1)
+        self.assertEqual(response.data["total_beds"], 1)  # nurse only reaches her own department's bed
+
+    def test_bed_board_free_bed_has_no_patient_name(self):
+        client = self._client_for(self.nurse)
+        response = client.get("/api/v1/admissions/bed_board/", HTTP_HOST=self.host)
+        self.assertEqual(response.status_code, 200, response.data)
+        dept_row = next(row for row in response.data["departments"] if row["id"] == self.dept_therapy.pk)
+        bed_row = next(b for b in dept_row["rooms"][0]["beds"] if b["id"] == self.bed_therapy.pk)
+        self.assertEqual(bed_row["status"], BedStatus.FREE)
+        self.assertIsNone(bed_row["patient_name"])
+
 
 class TransferServiceTests(TenantTestCase):
     """apps.inpatient.services.transfer_admission — the checklist's

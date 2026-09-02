@@ -38,6 +38,7 @@
 .mockup-page{
   --mint:#2F8F73;--mint-d:#256F5A;--mint-l:#E7F3EE;--navy:#1F3A52;
   --amber:#B9812E;--amber-l:#FDF1E1;--red:#B24632;--red-l:#F7E7E3;
+  --slate:#8A94A6;--slate-l:#EDEFF3;
   --bg:#F7F6F2;--card:#FFFFFF;--line:#E7E3DA;--ink:#1C2320;--ink-soft:#5B6660;
   background:var(--bg);color:var(--ink);font-family:'Inter',sans-serif;font-size:14px;
   -webkit-font-smoothing:antialiased;min-height:100vh;
@@ -163,4 +164,31 @@
 .mockup-page .bed-opt.taken{background:#F1EEE6;color:#B5AFA0;cursor:not-allowed;}
 .mockup-page .btn-submit{width:100%;padding:14px;border-radius:10px;background:var(--mint);color:#fff;border:none;font-size:14px;font-weight:700;cursor:pointer;}
 .mockup-page .btn-submit:disabled{opacity:0.4;cursor:not-allowed;}
+
+/* Коечный фонд */
+.mockup-page .bed-legend{display:flex;gap:18px;padding:12px 32px;background:var(--card);border-bottom:1px solid var(--line);font-size:12px;color:var(--ink-soft);flex-wrap:wrap;}
+.mockup-page .bed-legend span{display:flex;align-items:center;gap:6px;}
+.mockup-page .sw{width:14px;height:14px;border-radius:5px;display:inline-block;}
+.mockup-page .occ-bar{display:flex;align-items:center;gap:14px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 20px;}
+.mockup-page .occ-track{flex:1;height:14px;border-radius:999px;overflow:hidden;display:flex;background:var(--slate-l);}
+.mockup-page .occ-seg.occupied{background:var(--red);}
+.mockup-page .occ-seg.reserved{background:var(--amber);}
+.mockup-page .occ-seg.cleaning{background:var(--slate);}
+.mockup-page .occ-seg.free{background:var(--mint);}
+.mockup-page .occ-num{font-family:'IBM Plex Mono',monospace;font-size:13px;color:var(--navy);font-weight:600;white-space:nowrap;}
+.mockup-page .dept-block{background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden;}
+.mockup-page .dept-head{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--line);}
+.mockup-page .dept-head h3{font-size:15.5px;color:var(--navy);}
+.mockup-page .dept-head .cnt{font-size:12px;color:var(--ink-soft);}
+.mockup-page .rooms{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;padding:18px 20px;}
+.mockup-page .room{border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:8px;}
+.mockup-page .room-head{display:flex;align-items:center;justify-content:space-between;}
+.mockup-page .room-name{font-size:12.5px;font-weight:600;color:var(--ink-soft);}
+.mockup-page .room-cnt{font-size:10.5px;color:var(--ink-soft);}
+.mockup-page .beds{display:flex;gap:6px;flex-wrap:wrap;}
+.mockup-page .bed{width:34px;height:34px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;cursor:default;}
+.mockup-page .bed.free{background:var(--mint);}
+.mockup-page .bed.occupied{background:var(--red);}
+.mockup-page .bed.reserved{background:var(--amber);color:#3B2E14;}
+.mockup-page .bed.cleaning{background:var(--slate);}
 .mockup-modal .modal-foot{padding:18px 24px;border-top:1px solid var(--line);display:flex;gap:10px;justify-content:flex-end;}

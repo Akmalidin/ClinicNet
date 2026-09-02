@@ -74,6 +74,12 @@ const routes = [
     props: true,
     meta: { requiresAuth: true },
   },
+  {
+    path: '/beds',
+    name: 'bed-management',
+    component: () => import('../pages/BedManagementPage.vue'),
+    meta: { requiresAuth: true },
+  },
 ]
 
 const router = createRouter({

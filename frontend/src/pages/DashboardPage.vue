@@ -82,6 +82,13 @@ onMounted(() => {
           Триаж
         </RouterLink>
         <RouterLink
+          v-if="auth.bedBoardDepartments.length"
+          :to="{ name: 'bed-management' }"
+          class="text-primary hover:underline"
+        >
+          Койки
+        </RouterLink>
+        <RouterLink
           v-if="auth.roles.some((r) => r.role === 'Администратор сети')"
           :to="{ name: 'rbac-admin' }"
           class="text-primary hover:underline"

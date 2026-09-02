@@ -33,6 +33,10 @@ export const useAuthStore = defineStore('auth', {
     // apps.inpatient.rbac's docstring). AdmissionIntakePage.vue's entry
     // point and client-side guard.
     admissionDepartments: [],
+    // bed_board_departments: [id, ...] — same idea, union of view+manage
+    // (broader than admissionDepartments, which needs .manage) —
+    // BedManagementPage.vue's entry point and client-side guard.
+    bedBoardDepartments: [],
     ready: false,
   }),
   getters: {
@@ -53,6 +57,7 @@ export const useAuthStore = defineStore('auth', {
       this.churnBranches = []
       this.inventoryBranches = []
       this.admissionDepartments = []
+      this.bedBoardDepartments = []
     },
     async fetchMe() {
       const { data } = await meApi.get()
@@ -63,6 +68,7 @@ export const useAuthStore = defineStore('auth', {
       this.churnBranches = data.churn_branches ?? []
       this.inventoryBranches = data.inventory_branches ?? []
       this.admissionDepartments = data.admission_departments ?? []
+      this.bedBoardDepartments = data.bed_board_departments ?? []
     },
     // Called once on app boot: a stored access token doesn't mean it's
     // still valid, so this round-trips through /me/ (the request

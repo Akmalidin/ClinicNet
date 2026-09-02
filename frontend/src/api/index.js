@@ -134,6 +134,11 @@ export const admissionsApi = {
   // branch-scoped, а зав.отделением/медсестра видят только свои
   // отделения через StaffDepartmentAssignment.
   intakeOptions: () => client.get('admissions/intake_options/'),
+  // Отделения → палаты → койки с реальной занятостью (кто сейчас на
+  // койке) — bedmanagement.html. .view-gated, шире круг, чем
+  // intakeOptions (которое требует .manage) — координатор/врач/
+  // медсестра, кому нужно просто видеть занятость.
+  bedBoard: () => client.get('admissions/bed_board/'),
 }
 
 export const operationsApi = {

@@ -272,6 +272,62 @@ class AdmissionViewSet(viewsets.ModelViewSet):
         ]
         return Response(data)
 
+    @action(detail=False, methods=["get"], required_permission="inpatient.admission.view")
+    def bed_board(self, request):
+        """Коечный фонд (bedmanagement.html) — та же department-scoped
+        разведка/структура, что intake_options, но на .view (шире круг:
+        координатор/врач/медсестра, которым нужно просто видеть
+        занятость, не обязательно госпитализировать). Занятая койка
+        несёт настоящего пациента текущей активной госпитализации — в
+        макете там ФИО, для резерва — время/повод («Плановая, 14:00»);
+        последнего в модели нет вообще (Bed.status=RESERVED — просто
+        ручная пометка персонала без данных о том, для кого/когда, см.
+        Bed's докстринг), поэтому честно не показываем то, чего нет,
+        вместо выдумывания.
+        """
+        departments = departments_for_permission(
+            request.user, "inpatient.admission.view"
+        ).select_related("branch")
+        rooms = Room.objects.filter(department__in=departments, is_active=True).select_related("department")
+        beds = Bed.objects.filter(room__in=rooms).order_by("label")
+
+        patient_by_bed = {
+            admission.bed_id: str(admission.patient)
+            for admission in Admission.objects.filter(
+                bed__in=beds, status=AdmissionStatus.ACTIVE
+            ).select_related("patient")
+        }
+
+        beds_by_room = {}
+        occupancy = {choice: 0 for choice in BedStatus.values}
+        for bed in beds:
+            occupancy[bed.status] += 1
+            beds_by_room.setdefault(bed.room_id, []).append({
+                "id": bed.pk, "label": bed.label, "status": bed.status,
+                "patient_name": patient_by_bed.get(bed.pk),
+            })
+        rooms_by_department = {}
+        for room in rooms:
+            rooms_by_department.setdefault(room.department_id, []).append(
+                {"id": room.pk, "name": room.name, "beds": beds_by_room.get(room.pk, [])}
+            )
+
+        data = {
+            "occupancy": occupancy,
+            "total_beds": len(beds),
+            "departments": [
+                {
+                    "id": department.pk,
+                    "name": department.name,
+                    "branch": department.branch_id,
+                    "branch_name": department.branch.name,
+                    "rooms": rooms_by_department.get(department.pk, []),
+                }
+                for department in departments
+            ],
+        }
+        return Response(data)
+
     @action(detail=True, methods=["post"])
     def discharge(self, request, pk=None):
         admission = self.get_object()

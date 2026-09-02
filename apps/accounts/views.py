@@ -83,6 +83,16 @@ class MeView(APIView):
         data["admission_departments"] = sorted(
             departments_for_permission(user, "inpatient.admission.manage").values_list("id", flat=True)
         )
+        # bed_board_departments: [id, ...] — same idea, union of view+manage
+        # (same union shape as referral/triage/churn/inventory_branches
+        # above) — BedManagementPage.vue's entry point and client-side
+        # guard; broader than admission_departments since just VIEWING
+        # occupancy (inpatient.admission.view) is enough, no need to be
+        # able to admit patients yourself.
+        data["bed_board_departments"] = sorted(
+            set(departments_for_permission(user, "inpatient.admission.view").values_list("id", flat=True))
+            | set(departments_for_permission(user, "inpatient.admission.manage").values_list("id", flat=True))
+        )
         return Response(data)
 
 

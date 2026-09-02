@@ -519,6 +519,24 @@ class MeAdmissionDepartmentsTests(TenantTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["admission_departments"], [self.dept_therapy.pk])
 
+    def test_bed_board_departments_includes_view_only_reach(self):
+        """Union of view+manage — a nurse (view only, no manage) still
+        reaches the bed board for her department, unlike admission_
+        departments which requires .manage."""
+        from apps.inpatient.models import StaffDepartmentAssignment
+
+        view_perm = Permission.objects.create(code="inpatient.admission.view", category="inpatient")
+        nurse_role = Role.objects.create(name="Постовая медсестра", codename="nurse")
+        RolePermission.objects.create(role=nurse_role, permission=view_perm)
+        nurse = User.objects.create(username="me_nurse")
+        UserRole.objects.create(user=nurse, role=nurse_role, branch_scope=BranchScope.SPECIFIC_BRANCHES)
+        StaffDepartmentAssignment.objects.create(staff=nurse, department=self.dept_therapy)
+
+        response = self._me(nurse)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["admission_departments"], [])  # no .manage
+        self.assertEqual(response.json()["bed_board_departments"], [self.dept_therapy.pk])
+
 
 class UsersWithPermissionTests(TenantTestCase):
     """Reverse lookup used by apps.referrals' escalate_stale_referrals:
