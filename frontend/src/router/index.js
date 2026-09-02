@@ -93,6 +93,12 @@ const routes = [
     component: () => import('../pages/MultiBranchSchedulePage.vue'),
     meta: { requiresAuth: true },
   },
+  {
+    path: '/network-dashboard',
+    name: 'network-dashboard',
+    component: () => import('../pages/NetworkDashboardPage.vue'),
+    meta: { requiresAuth: true },
+  },
 ]
 
 const router = createRouter({

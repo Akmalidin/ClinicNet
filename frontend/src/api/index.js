@@ -42,6 +42,15 @@ export const appointmentsApi = {
   // get_queryset) — used by MultiBranchSchedulePage.vue for a single
   // network-wide day.
   list: (params) => client.get('appointments/', { params }),
+  // Загрузка врачей за день (booked/available минут) — см.
+  // AppointmentViewSet.utilization's докстринг.
+  utilization: (date) => client.get('appointments/utilization/', { params: date ? { date } : {} }),
+}
+
+export const financeReportApi = {
+  // apps.finance.views.FinanceReportView — per-branch payments/refunds
+  // net total for an optional date range, scoped to finance.view branches.
+  get: (params) => client.get('finance/report/', { params }),
 }
 
 export const specialtiesApi = {
@@ -102,6 +111,11 @@ export const stocksApi = {
   // are always computed from the StockMovement ledger, never stored.
   list: (params) => client.get('stocks/', { params }),
   adjust: (id, data) => client.post(`stocks/${id}/adjust/`, data),
+  // Every Stock row below its own min_quantity, scoped to this user's
+  // branches — the network dashboard's "остаток < минимума" alert
+  // source (see StockViewSet.low_stock's docstring: built for exactly
+  // this).
+  lowStock: () => client.get('stocks/low_stock/'),
 }
 
 export const churnApi = {

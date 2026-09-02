@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import time, timedelta
 
 from django.core.exceptions import ValidationError
 from django.utils import timezone
@@ -6,7 +6,7 @@ from django_tenants.test.cases import TenantTestCase
 from rest_framework.test import APIClient
 
 from apps.accounts.models import BranchScope, Permission, Role, RolePermission, User, UserRole
-from apps.branches.models import Branch
+from apps.branches.models import Branch, StaffBranchAssignment, Weekday
 from apps.patients.models import Patient
 from apps.referrals.models import Referral
 from apps.visits.models import Visit
@@ -190,3 +190,76 @@ class AppointmentDateFilterAPITests(TenantTestCase):
         self.assertEqual(response.status_code, 200)
         ids = {row["id"] for row in response.json()}
         self.assertEqual(ids, {self.today_appt.pk, self.tomorrow_appt.pk})
+
+
+class AppointmentUtilizationAPITests(TenantTestCase):
+    """AppointmentViewSet.utilization — найдено при разведке
+    networkdashboard.html: KPI "загрузка врачей" нигде не считался."""
+
+    def setUp(self):
+        self.branch = Branch.objects.create(name="Филиал", code="a")
+        view_perm = Permission.objects.create(code="appointment.view", category="scheduling")
+        role = Role.objects.create(name="Врач", codename="doctor")
+        RolePermission.objects.create(role=role, permission=view_perm)
+
+        self.doctor = User.objects.create(username="doc")
+        self.viewer = User.objects.create(username="viewer")
+        UserRole.objects.create(user=self.viewer, role=role, branch_scope=BranchScope.ALL)
+        self.patient = Patient.objects.create(first_name="Тест", last_name="Пациентов")
+
+        self.client_api = APIClient()
+        self.client_api.force_authenticate(user=self.viewer)
+        self.host = self.domain.domain
+
+        # A Wednesday, so weekday() == 2 (matches Weekday.WEDNESDAY).
+        self.target_date = timezone.now().date()
+        while self.target_date.weekday() != Weekday.WEDNESDAY:
+            self.target_date += timedelta(days=1)
+
+    def _dt(self, hour, minute=0):
+        return timezone.make_aware(
+            timezone.datetime.combine(self.target_date, time(hour, minute))
+        )
+
+    def test_no_shifts_means_null_utilization_not_a_crash(self):
+        response = self.client_api.get(
+            "/api/v1/appointments/utilization/", {"date": self.target_date.isoformat()}, HTTP_HOST=self.host,
+        )
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertIsNone(response.data["utilization_percent"])
+        self.assertEqual(response.data["available_minutes"], 0)
+
+    def test_utilization_computed_from_real_shift_and_bookings(self):
+        # 4 hours of shift (9:00-13:00) = 240 available minutes.
+        StaffBranchAssignment.objects.create(
+            staff=self.doctor, branch=self.branch, weekday=Weekday.WEDNESDAY,
+            start_time=time(9, 0), end_time=time(13, 0),
+        )
+        # 60 booked minutes (two 30-minute appointments).
+        Appointment.objects.create(
+            branch=self.branch, patient=self.patient, doctor=self.doctor,
+            starts_at=self._dt(9), ends_at=self._dt(9, 30),
+        )
+        Appointment.objects.create(
+            branch=self.branch, patient=self.patient, doctor=self.doctor,
+            starts_at=self._dt(10), ends_at=self._dt(10, 30),
+            status=AppointmentStatus.CANCELLED,  # must NOT count as occupying time
+        )
+        Appointment.objects.create(
+            branch=self.branch, patient=self.patient, doctor=self.doctor,
+            starts_at=self._dt(11), ends_at=self._dt(11, 30),
+        )
+
+        response = self.client_api.get(
+            "/api/v1/appointments/utilization/", {"date": self.target_date.isoformat()}, HTTP_HOST=self.host,
+        )
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["available_minutes"], 240)
+        self.assertEqual(response.data["booked_minutes"], 60)
+        self.assertEqual(response.data["utilization_percent"], 25.0)
+
+    def test_malformed_date_is_rejected_not_500(self):
+        response = self.client_api.get(
+            "/api/v1/appointments/utilization/", {"date": "not-a-date"}, HTTP_HOST=self.host,
+        )
+        self.assertEqual(response.status_code, 400)
