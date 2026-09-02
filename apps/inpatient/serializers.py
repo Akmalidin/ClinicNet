@@ -243,12 +243,16 @@ class OperationSerializer(serializers.ModelSerializer):
     patient_name = serializers.CharField(source="admission.patient.__str__", read_only=True)
     operating_room_name = serializers.CharField(source="operating_room.name", read_only=True)
     lead_surgeon_name = serializers.CharField(source="lead_surgeon.__str__", read_only=True)
+    branch_name = serializers.CharField(source="admission.department.branch.name", read_only=True)
+    team_detail = serializers.SerializerMethodField()
 
     class Meta:
         model = Operation
         fields = (
             "id", "admission", "patient_name", "operating_room", "operating_room_name",
+            "branch_name",
             "procedure_name", "starts_at", "ends_at", "lead_surgeon", "lead_surgeon_name", "team",
+            "team_detail",
             "status",
             "sign_in_confirmed_by", "sign_in_confirmed_at",
             "time_out_confirmed_by", "time_out_confirmed_at",
@@ -285,3 +289,12 @@ class OperationSerializer(serializers.ModelSerializer):
                 exc.message_dict if hasattr(exc, "message_dict") else exc.messages
             )
         return attrs
+
+    def get_team_detail(self, obj):
+        # Свободный job_title (apps.accounts.User), не роль-в-операции —
+        # такого поля в модели нет (team — плоский M2M, см. Operation's
+        # докстринг), не выдумываем то, чего нет в данных.
+        return [
+            {"id": member.pk, "name": str(member), "job_title": member.job_title}
+            for member in obj.team.all()
+        ]

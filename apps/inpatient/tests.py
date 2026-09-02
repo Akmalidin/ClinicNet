@@ -1080,6 +1080,22 @@ class OperationAPIRBACTests(TenantTestCase):
         self.assertEqual(response.status_code, 201, response.data)
         self.assertEqual(response.data["status"], OperationStatus.SCHEDULED)
 
+    def test_serializer_exposes_branch_name_and_team_detail(self):
+        """Added for the operation-checklist frontend page (needs the
+        branch name and each team member's display name/job_title, not
+        just raw FK ids) — apps.inpatient.serializers.OperationSerializer."""
+        anesthesiologist = User.objects.create(username="anesth", job_title="Анестезиолог")
+        client = self._client_for(self.surgeon)
+        response = client.post(
+            "/api/v1/operations/", self._payload(team=[anesthesiologist.pk]), HTTP_HOST=self.host
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["branch_name"], self.branch.name)
+        self.assertEqual(
+            response.data["team_detail"],
+            [{"id": anesthesiologist.pk, "name": str(anesthesiologist), "job_title": "Анестезиолог"}],
+        )
+
     def test_nurse_cannot_schedule_operation(self):
         client = self._client_for(self.nurse)
         response = client.post("/api/v1/operations/", self._payload(), HTTP_HOST=self.host)

@@ -296,6 +296,93 @@ class InvoiceAPITests(TenantTestCase):
         self.assertEqual(Decimal(report_b.data["network_total"]), Decimal("0"))
 
 
+class BonusPaymentTests(TenantTestCase):
+    """PaymentMethod.BONUS — added for the Касса frontend page: pay with
+    the patient's loyalty_points balance (apps.patients.Patient), the one
+    real gap found while porting billinginvoice.html against actual
+    finance models (QR/bonus weren't real payment methods before)."""
+
+    def setUp(self):
+        self.branch = Branch.objects.create(name="Филиал А", code="a")
+        view_perm = Permission.objects.create(code="finance.view", category="finance")
+        manage_perm = Permission.objects.create(code="finance.manage", category="finance")
+        cashier_role = Role.objects.create(name="Кассир", codename="cashier")
+        RolePermission.objects.create(role=cashier_role, permission=view_perm)
+        RolePermission.objects.create(role=cashier_role, permission=manage_perm)
+
+        self.cashier = User.objects.create(username="cashier_bonus")
+        UserRole.objects.create(user=self.cashier, role=cashier_role, branch_scope=BranchScope.OWN_BRANCH)
+        StaffBranchAssignment.objects.create(
+            staff=self.cashier, branch=self.branch, weekday=Weekday.MONDAY,
+            start_time=time(9, 0), end_time=time(18, 0),
+        )
+        self.patient = Patient.objects.create(first_name="Тест", last_name="Бонусов", loyalty_points=1000)
+        self.host = self.domain.domain
+
+    def _client(self):
+        client = APIClient()
+        client.force_authenticate(user=self.cashier)
+        return client
+
+    def _issued_invoice(self, total="1000"):
+        client = self._client()
+        create = client.post(
+            "/api/v1/invoices/", {"patient": self.patient.pk, "branch": self.branch.pk}, HTTP_HOST=self.host,
+        )
+        invoice_id = create.data["id"]
+        client.post(
+            f"/api/v1/invoices/{invoice_id}/add_line/",
+            {"description": "Приём", "quantity": 1, "unit_price": total},
+            HTTP_HOST=self.host,
+        )
+        client.post(f"/api/v1/invoices/{invoice_id}/issue/", HTTP_HOST=self.host)
+        return invoice_id
+
+    def test_paying_with_bonus_deducts_patient_balance(self):
+        invoice_id = self._issued_invoice(total="600")
+        response = self._client().post(
+            f"/api/v1/invoices/{invoice_id}/pay/",
+            {"kind": "payment", "amount": "600", "method": "bonus"},
+            HTTP_HOST=self.host,
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertTrue(response.data["is_paid"])
+        self.patient.refresh_from_db()
+        self.assertEqual(self.patient.loyalty_points, 400)
+
+    def test_bonus_payment_beyond_balance_is_rejected(self):
+        invoice_id = self._issued_invoice(total="5000")
+        response = self._client().post(
+            f"/api/v1/invoices/{invoice_id}/pay/",
+            {"kind": "payment", "amount": "5000", "method": "bonus"},
+            HTTP_HOST=self.host,
+        )
+        self.assertEqual(response.status_code, 400)
+        self.patient.refresh_from_db()
+        self.assertEqual(self.patient.loyalty_points, 1000)
+
+    def test_bonus_payment_must_be_whole_points(self):
+        invoice_id = self._issued_invoice(total="600.50")
+        response = self._client().post(
+            f"/api/v1/invoices/{invoice_id}/pay/",
+            {"kind": "payment", "amount": "600.50", "method": "bonus"},
+            HTTP_HOST=self.host,
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_loyalty_points_not_writable_via_patient_patch(self):
+        client = self._client()
+        # cashier only has finance.*, not patient.manage — expect 403,
+        # confirming this isn't reachable that way either; but the field
+        # itself is also read_only on the serializer regardless of who asks.
+        response = client.patch(
+            f"/api/v1/patients/{self.patient.pk}/", {"loyalty_points": 99999}, HTTP_HOST=self.host,
+        )
+        self.assertIn(response.status_code, (403, 200))
+        self.patient.refresh_from_db()
+        self.assertEqual(self.patient.loyalty_points, 1000)
+
+
 class ServicePricingModelTests(TenantTestCase):
     def setUp(self):
         self.branch_a = Branch.objects.create(name="Филиал А", code="a")

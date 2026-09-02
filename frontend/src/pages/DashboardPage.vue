@@ -60,6 +60,34 @@ onMounted(() => {
       <h1 class="text-lg font-semibold text-gray-900">ClinicNet</h1>
       <div class="flex items-center gap-4 text-sm text-gray-600">
         <RouterLink :to="{ name: 'schedule' }" class="text-primary hover:underline">Расписание</RouterLink>
+        <RouterLink
+          v-if="auth.churnBranches.length"
+          :to="{ name: 'churn-alerts' }"
+          class="text-primary hover:underline"
+        >
+          Отток
+        </RouterLink>
+        <RouterLink
+          v-if="auth.inventoryBranches.length"
+          :to="{ name: 'warehouse-stock' }"
+          class="text-primary hover:underline"
+        >
+          Склад
+        </RouterLink>
+        <RouterLink
+          v-if="auth.roles.some((r) => r.role === 'Администратор сети')"
+          :to="{ name: 'rbac-admin' }"
+          class="text-primary hover:underline"
+        >
+          Роли и доступ
+        </RouterLink>
+        <RouterLink
+          v-if="auth.roles.some((r) => r.role === 'Администратор сети')"
+          :to="{ name: 'staff-hr' }"
+          class="text-primary hover:underline"
+        >
+          Персонал
+        </RouterLink>
         <span>{{ auth.user?.first_name || auth.user?.username }}</span>
         <button class="btn-secondary" @click="logout">Выйти</button>
       </div>

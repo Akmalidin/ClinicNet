@@ -1,7 +1,7 @@
 from decimal import Decimal, InvalidOperation
 
 from django.core.exceptions import ValidationError as DjangoValidationError
-from django.db.models import Q, Sum
+from django.db.models import F, Q, Sum
 from django.db.models.functions import Coalesce
 from rest_framework import generics
 from rest_framework import serializers as drf_serializers
@@ -12,6 +12,7 @@ from rest_framework.response import Response
 
 from apps.accounts.permissions import HasBranchPermission, HasNetworkWidePermission, HasPermission
 from apps.accounts.rbac import branches_for_permission
+from apps.patients.models import Patient
 
 from .models import (
     ZERO,
@@ -23,6 +24,7 @@ from .models import (
     InvoiceStatus,
     Payment,
     PaymentKind,
+    PaymentMethod,
     Service,
 )
 from .serializers import (
@@ -187,6 +189,8 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         except (InvalidOperation, TypeError):
             return Response({"detail": "Некорректная сумма."}, status=400)
 
+        method = request.data.get("method", "cash")
+
         if kind == PaymentKind.PAYMENT:
             if invoice.balance_due <= ZERO:
                 return Response({"detail": "Счёт уже полностью оплачен."}, status=400)
@@ -202,12 +206,28 @@ class InvoiceViewSet(viewsets.ModelViewSet):
                     status=400,
                 )
 
+        # Бонусный баланс (apps.patients.Patient.loyalty_points) —
+        # проверяется и списывается только здесь, единственный путь
+        # списания (см. PaymentMethod.BONUS's докстринг). Возврат
+        # бонусами намеренно не восстанавливает баллы — упрощение, нет
+        # леджера начислений, которому можно было бы вернуть точную
+        # причину списания.
+        if method == PaymentMethod.BONUS and kind == PaymentKind.PAYMENT:
+            if amount != amount.to_integral_value():
+                return Response({"detail": "Оплата бонусами — только целое число баллов."}, status=400)
+            points = int(amount)
+            if points > invoice.patient.loyalty_points:
+                return Response(
+                    {"detail": f"На счету пациента только {invoice.patient.loyalty_points} баллов."},
+                    status=400,
+                )
+
         payment = Payment(
             invoice=invoice,
             branch=invoice.branch,
             received_by=request.user,
             kind=kind,
-            method=request.data.get("method", "cash"),
+            method=method,
             amount=amount,
             note=request.data.get("note", ""),
         )
@@ -216,6 +236,12 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         except DjangoValidationError as exc:
             raise drf_serializers.ValidationError(_validation_detail(exc))
         payment.save()
+
+        if method == PaymentMethod.BONUS and kind == PaymentKind.PAYMENT:
+            Patient.objects.filter(pk=invoice.patient_id).update(
+                loyalty_points=F("loyalty_points") - int(amount)
+            )
+
         invoice.refresh_from_db()  # see add_line's comment on stale prefetch
         return Response(self.get_serializer(invoice).data, status=201)
 

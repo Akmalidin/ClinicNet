@@ -72,6 +72,57 @@ export const notificationsApi = {
   markRead: (id) => client.patch(`notifications/${id}/`, { is_read: true }),
 }
 
+export const insurancePoliciesApi = {
+  list: (params) => client.get('insurance-policies/', { params }),
+}
+
+export const invoicesApi = {
+  // apps.finance.views.InvoiceViewSet — total_amount/patient_owed_amount/
+  // paid_total/balance_due/is_paid are always computed, never stored
+  // (see Invoice's model docstring).
+  get: (id) => client.get(`invoices/${id}/`),
+  pay: (id, data) => client.post(`invoices/${id}/pay/`, data),
+}
+
+export const stocksApi = {
+  // apps.inventory.views.StockViewSet — on_hand_quantity/is_below_minimum
+  // are always computed from the StockMovement ledger, never stored.
+  list: (params) => client.get('stocks/', { params }),
+  adjust: (id, data) => client.post(`stocks/${id}/adjust/`, data),
+}
+
+export const churnApi = {
+  // apps.churn.views.ChurnRiskViewSet — read-only + transitions (created
+  // only by the calculate_churn_risks cron, never via POST here).
+  list: (params) => client.get('churn-risks/', { params }),
+  acknowledge: (id) => client.post(`churn-risks/${id}/acknowledge/`, {}),
+  dismiss: (id) => client.post(`churn-risks/${id}/dismiss/`, {}),
+}
+
+export const staffApi = {
+  // apps.accounts.views.StaffDirectoryView — network-wide, ALL-scope
+  // gated (staff.view_network); a 403 here is expected for anyone but
+  // network-admin, not a bug.
+  list: () => client.get('staff/'),
+}
+
+export const rolesApi = {
+  // apps.accounts.views.RoleViewSet — each role embeds its full nested
+  // permissions (code/category/description), see RoleSerializer.
+  list: () => client.get('roles/'),
+}
+
+export const operationsApi = {
+  // apps.inpatient.views.OperationViewSet — checklist actions take no
+  // body (POST {}), see apps/inpatient/tests.py's
+  // test_full_checklist_flow_then_complete.
+  get: (id) => client.get(`operations/${id}/`),
+  signIn: (id) => client.post(`operations/${id}/sign_in/`, {}),
+  timeOut: (id) => client.post(`operations/${id}/time_out/`, {}),
+  signOut: (id) => client.post(`operations/${id}/sign_out/`, {}),
+  complete: (id) => client.post(`operations/${id}/complete/`, {}),
+}
+
 export const labOrdersApi = {
   list: (params) => client.get('lab-orders/', { params }),
   create: (data) => client.post('lab-orders/', data),

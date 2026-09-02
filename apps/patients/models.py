@@ -22,6 +22,16 @@ class Patient(models.Model):
         help_text="Филиал, где пациент чаще всего наблюдается (справочно).",
     )
     notes = models.TextField(blank=True)
+    # Бонусный счёт лояльности — сеть-wide, тот же принцип, что у самого
+    # Patient (не привязан к филиалу). Простой убывающий баланс, не
+    # полноценный леджер начислений/списаний (нет программы начисления
+    # баллов вообще, пока только оплата ими — см. apps.finance.
+    # PaymentMethod.BONUS): списывается только в InvoiceViewSet.pay(),
+    # правится вручную через admin до появления реальной программы
+    # лояльности. Не PositiveIntegerField — списание защищено проверкой
+    # на стороне pay(), но отрицательный баланс не должен быть в принципе
+    # непредставим на уровне поля (валидируется в clean()).
+    loyalty_points = models.IntegerField(default=0, verbose_name="Бонусные баллы")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

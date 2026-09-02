@@ -7,7 +7,7 @@ from .models import Permission, Role, RolePermission, Specialty, User, UserRole
 @admin.register(User)
 class UserAdmin(DjangoUserAdmin):
     fieldsets = DjangoUserAdmin.fieldsets + (
-        ("ClinicNet", {"fields": ("phone", "job_title", "specialties")}),
+        ("ClinicNet", {"fields": ("phone", "job_title", "specialties", "license_expires_at")}),
     )
     filter_horizontal = DjangoUserAdmin.filter_horizontal + ("specialties",)
     list_display = ("username", "get_full_name", "job_title", "is_active", "is_staff")

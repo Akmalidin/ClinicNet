@@ -24,6 +24,10 @@ export const useAuthStore = defineStore('auth', {
     // at all — a user without triage.view shouldn't even fetch the
     // triage-suggestions endpoint (it'd just 403).
     triageBranches: [],
+    // churn_branches: [id, ...] — same convention (ChurnAlertsPage.vue).
+    churnBranches: [],
+    // inventory_branches: [id, ...] — same convention (WarehouseStockPage.vue).
+    inventoryBranches: [],
     ready: false,
   }),
   getters: {
@@ -41,6 +45,8 @@ export const useAuthStore = defineStore('auth', {
       this.roles = []
       this.referralBranches = []
       this.triageBranches = []
+      this.churnBranches = []
+      this.inventoryBranches = []
     },
     async fetchMe() {
       const { data } = await meApi.get()
@@ -48,6 +54,8 @@ export const useAuthStore = defineStore('auth', {
       this.roles = data.roles ?? []
       this.referralBranches = data.referral_branches ?? []
       this.triageBranches = data.triage_branches ?? []
+      this.churnBranches = data.churn_branches ?? []
+      this.inventoryBranches = data.inventory_branches ?? []
     },
     // Called once on app boot: a stored access token doesn't mean it's
     // still valid, so this round-trips through /me/ (the request
