@@ -121,6 +121,21 @@ export const rolesApi = {
   list: () => client.get('roles/'),
 }
 
+export const admissionsApi = {
+  // apps.inpatient.views.AdmissionViewSet
+  list: (params) => client.get('admissions/', { params }),
+  get: (id) => client.get(`admissions/${id}/`),
+  create: (data) => client.post('admissions/', data),
+  discharge: (id, epicrisis) => client.post(`admissions/${id}/discharge/`, { discharge_epicrisis: epicrisis }),
+  // Отделения → палаты → койки (со статусом), доступные текущему
+  // пользователю для госпитализации — department-scoped convenience
+  // action, см. AdmissionViewSet.intake_options's докстринг: обычные
+  // DepartmentViewSet/RoomViewSet/BedViewSet тут не подходят, они
+  // branch-scoped, а зав.отделением/медсестра видят только свои
+  // отделения через StaffDepartmentAssignment.
+  intakeOptions: () => client.get('admissions/intake_options/'),
+}
+
 export const operationsApi = {
   // apps.inpatient.views.OperationViewSet — checklist actions take no
   // body (POST {}), see apps/inpatient/tests.py's

@@ -138,6 +138,18 @@ class AdmissionStatus(models.TextChoices):
     DISCHARGED = "discharged", "Выписан"
 
 
+class AdmissionReason(models.TextChoices):
+    """Найдено при разведке admissionintake.html — "Основание" госпи-
+    тализации нигде не хранилось (только диагноз). Чисто описательная
+    категоризация, ни на что не влияющая структурно (в отличие от
+    статуса) — как AppointmentReason'а тут нет, справочника заводить не
+    нужно, три варианта фиксированы прямо в макете."""
+
+    PLANNED = "planned", "Плановая операция"
+    EMERGENCY = "emergency", "Экстренная госпитализация"
+    TRANSFER = "transfer", "Перевод из другого отделения"
+
+
 # Один терминальный статус, не три, как в черновике промпта (active/
 # transferred/discharged) — "переведён" не тupik, госпитализация после
 # перевода остаётся активной, просто в другом отделении/на другой
@@ -170,6 +182,14 @@ class Admission(models.Model):
         "accounts.User", on_delete=models.PROTECT, related_name="admissions_placed"
     )
     diagnosis_at_admission = models.TextField(verbose_name="Диагноз при поступлении")
+    reason = models.CharField(
+        max_length=20, choices=AdmissionReason.choices, default=AdmissionReason.PLANNED,
+        verbose_name="Основание госпитализации",
+    )
+    notes = models.TextField(
+        blank=True, verbose_name="Заметки при поступлении",
+        help_text="Аллергии, план на ближайшую операцию и т.п. — отдельно от клинического диагноза.",
+    )
     status = models.CharField(
         max_length=20, choices=AdmissionStatus.choices, default=AdmissionStatus.ACTIVE
     )

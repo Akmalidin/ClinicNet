@@ -1,10 +1,13 @@
 from django.core.exceptions import ValidationError
 from django.db import transaction
 
-from .models import Admission, AdmissionStatus, Bed, BedStatus, Transfer
+from .models import Admission, AdmissionReason, AdmissionStatus, Bed, BedStatus, Transfer
 
 
-def admit_patient(*, patient, department, bed, attending_doctor, admitted_by, diagnosis_at_admission, admitted_at=None):
+def admit_patient(
+    *, patient, department, bed, attending_doctor, admitted_by, diagnosis_at_admission,
+    reason=AdmissionReason.PLANNED, notes="", admitted_at=None,
+):
     """Creates an ACTIVE Admission and occupies its bed as one atomic
     step — same "validate everything, write everything, or neither"
     discipline as apps.inventory.services.consume_for_visit. The bed's
@@ -24,6 +27,8 @@ def admit_patient(*, patient, department, bed, attending_doctor, admitted_by, di
         attending_doctor=attending_doctor,
         admitted_by=admitted_by,
         diagnosis_at_admission=diagnosis_at_admission,
+        reason=reason,
+        notes=notes,
         status=AdmissionStatus.ACTIVE,
     )
     if admitted_at is not None:

@@ -78,7 +78,7 @@ class AdmissionSerializer(serializers.ModelSerializer):
             "bed", "bed_label", "room_name",
             "attending_doctor", "attending_doctor_name",
             "admitted_by", "admitted_by_name",
-            "diagnosis_at_admission", "status",
+            "diagnosis_at_admission", "reason", "notes", "status",
             "admitted_at", "discharged_at", "discharge_epicrisis",
             "updated_at",
         )

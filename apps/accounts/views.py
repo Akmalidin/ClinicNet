@@ -68,6 +68,21 @@ class MeView(APIView):
             set(branches_for_permission(user, "inventory.view").values_list("id", flat=True))
             | set(branches_for_permission(user, "inventory.stock.manage").values_list("id", flat=True))
         )
+        # admission_departments: [id, ...] — DEPARTMENT ids (not branches —
+        # one level deeper, see apps.inpatient.rbac's docstring), where this
+        # user holds inpatient.admission.manage. Local import, same
+        # boundary-crossing convention StaffDirectoryView already uses
+        # below: apps.accounts deliberately doesn't import apps.inpatient
+        # at module level (decided explicitly at the start of Phase 4).
+        # AdmissionIntakePage.vue uses this the same way every other page
+        # here uses its *_branches list — decide whether to even show the
+        # "Госпитализировать" entry point, and as the client-side guard
+        # (never trust that /admissions/intake_options/ alone is enough).
+        from apps.inpatient.rbac import departments_for_permission
+
+        data["admission_departments"] = sorted(
+            departments_for_permission(user, "inpatient.admission.manage").values_list("id", flat=True)
+        )
         return Response(data)
 
 

@@ -152,4 +152,15 @@
 .mockup-page .slots-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;}
 .mockup-page .slot-btn{padding:8px 4px;border-radius:8px;border:1px solid var(--line);background:#fff;text-align:center;font-size:11.5px;font-family:'IBM Plex Mono',monospace;cursor:pointer;}
 .mockup-page .slot-btn.selected{background:var(--mint);color:#fff;border-color:var(--mint);}
+
+/* Приём в стационар */
+.mockup-page .field{margin-bottom:14px;}
+.mockup-page .field:last-child{margin-bottom:0;}
+.mockup-page textarea{width:100%;padding:10px 13px;border-radius:9px;border:1px solid var(--line);font-size:13px;font-family:'Inter',sans-serif;color:var(--ink);resize:vertical;min-height:70px;}
+.mockup-page .bed-picker{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;}
+.mockup-page .bed-opt{padding:10px 6px;border-radius:9px;border:1px solid var(--line);text-align:center;font-size:11.5px;cursor:pointer;background:#fff;}
+.mockup-page .bed-opt.selected{background:var(--mint);color:#fff;border-color:var(--mint);}
+.mockup-page .bed-opt.taken{background:#F1EEE6;color:#B5AFA0;cursor:not-allowed;}
+.mockup-page .btn-submit{width:100%;padding:14px;border-radius:10px;background:var(--mint);color:#fff;border:none;font-size:14px;font-weight:700;cursor:pointer;}
+.mockup-page .btn-submit:disabled{opacity:0.4;cursor:not-allowed;}
 .mockup-modal .modal-foot{padding:18px 24px;border-top:1px solid var(--line);display:flex;gap:10px;justify-content:flex-end;}

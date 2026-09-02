@@ -10,6 +10,7 @@ from apps.patients.models import Patient
 
 from .models import (
     Admission,
+    AdmissionReason,
     AdmissionStatus,
     Bed,
     BedStatus,
@@ -106,6 +107,17 @@ class AdmissionModelTests(TenantTestCase):
         admission.save()
         admission.discharge()
         admission.status = AdmissionStatus.ACTIVE
+        with self.assertRaises(ValidationError):
+            admission.full_clean()
+
+    def test_reason_defaults_to_planned(self):
+        admission = self._admission()
+        admission.full_clean()
+        admission.save()
+        self.assertEqual(admission.reason, AdmissionReason.PLANNED)
+
+    def test_invalid_reason_rejected(self):
+        admission = self._admission(reason="not-a-real-choice")
         with self.assertRaises(ValidationError):
             admission.full_clean()
 
@@ -349,8 +361,24 @@ class AdmissionAPIRBACTests(TenantTestCase):
         )
         self.assertEqual(response.status_code, 201, response.data)
         self.assertEqual(response.data["status"], AdmissionStatus.ACTIVE)
+        self.assertEqual(response.data["reason"], AdmissionReason.PLANNED)  # not sent -> default
         self.bed_therapy.refresh_from_db()
         self.assertEqual(self.bed_therapy.status, BedStatus.OCCUPIED)
+
+    def test_doctor_admits_with_explicit_reason_and_notes(self):
+        client = self._client_for(self.doctor)
+        response = client.post(
+            "/api/v1/admissions/",
+            {
+                "patient": self.patient.pk, "department": self.dept_therapy.pk, "bed": self.bed_therapy.pk,
+                "attending_doctor": self.doctor.pk, "diagnosis_at_admission": "Аппендицит",
+                "reason": AdmissionReason.EMERGENCY, "notes": "Аллергия на пенициллин.",
+            },
+            HTTP_HOST=self.host,
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["reason"], AdmissionReason.EMERGENCY)
+        self.assertEqual(response.data["notes"], "Аллергия на пенициллин.")
 
     def test_double_booking_the_same_bed_via_api_is_rejected(self):
         client = self._client_for(self.doctor)
@@ -420,6 +448,47 @@ class AdmissionAPIRBACTests(TenantTestCase):
         response = client.get("/api/v1/admissions/", HTTP_HOST=self.host)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 0)
+
+    def test_doctor_sees_intake_options_for_whole_own_branch(self):
+        client = self._client_for(self.doctor)
+        response = client.get("/api/v1/admissions/intake_options/", HTTP_HOST=self.host)
+        self.assertEqual(response.status_code, 200, response.data)
+        dept_ids = {row["id"] for row in response.data}
+        self.assertEqual(dept_ids, {self.dept_therapy.pk, self.dept_surgery.pk})
+        therapy_row = next(row for row in response.data if row["id"] == self.dept_therapy.pk)
+        self.assertEqual(therapy_row["branch"], self.branch_a.pk)
+        self.assertEqual(
+            therapy_row["rooms"],
+            [{"id": self.room_therapy.pk, "name": "204", "beds": [
+                {"id": self.bed_therapy.pk, "label": "1", "status": BedStatus.FREE},
+            ]}],
+        )
+
+    def test_nurse_without_admission_manage_cannot_see_intake_options(self):
+        """intake_options is gated by inpatient.admission.manage — the
+        fixture nurse only holds .view (she executes orders/vitals, doesn't
+        admit patients herself, same as seed_rbac.py's real "nurse" role)."""
+        client = self._client_for(self.nurse)
+        response = client.get("/api/v1/admissions/intake_options/", HTTP_HOST=self.host)
+        self.assertEqual(response.status_code, 403)
+
+    def test_department_scoped_role_sees_only_her_assigned_department(self):
+        """Department-head-shaped role (SPECIFIC_BRANCHES, no branches —
+        visibility only via StaffDepartmentAssignment, same provisioning
+        as apps.inpatient.rbac's docstring): the exact gap intake_options
+        exists to close — she couldn't have found her own ward through the
+        branch-scoped DepartmentViewSet/RoomViewSet/BedViewSet at all."""
+        manage_perm = Permission.objects.get(code="inpatient.admission.manage")
+        head_role = Role.objects.create(name="Заведующий отделением", codename="department-head-test")
+        RolePermission.objects.create(role=head_role, permission=manage_perm)
+        head = User.objects.create(username="dept_head_therapy")
+        UserRole.objects.create(user=head, role=head_role, branch_scope=BranchScope.SPECIFIC_BRANCHES)
+        StaffDepartmentAssignment.objects.create(staff=head, department=self.dept_therapy)
+
+        client = self._client_for(head)
+        response = client.get("/api/v1/admissions/intake_options/", HTTP_HOST=self.host)
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual({row["id"] for row in response.data}, {self.dept_therapy.pk})
 
 
 class TransferServiceTests(TenantTestCase):

@@ -455,6 +455,71 @@ class MeInventoryBranchesTests(TenantTestCase):
         self.assertEqual(response.json()["inventory_branches"], [self.branch_a.pk])
 
 
+class MeAdmissionDepartmentsTests(TenantTestCase):
+    """MeView's admission_departments — one level deeper than the
+    *_branches lists above (DEPARTMENT ids, not branches — see
+    apps.inpatient.rbac's docstring): AdmissionIntakePage.vue's entry
+    point and client-side guard."""
+
+    def setUp(self):
+        from apps.inpatient.models import Department, StaffDepartmentAssignment
+
+        self.branch_a = Branch.objects.create(name="Филиал А", code="a")
+        self.dept_therapy = Department.objects.create(branch=self.branch_a, name="Терапия", code="therapy")
+        self.dept_surgery = Department.objects.create(branch=self.branch_a, name="Хирургия", code="surgery")
+
+        manage_perm = Permission.objects.create(code="inpatient.admission.manage", category="inpatient")
+
+        doctor_role = Role.objects.create(name="Врач", codename="doctor")
+        RolePermission.objects.create(role=doctor_role, permission=manage_perm)
+
+        head_role = Role.objects.create(name="Заведующий отделением", codename="department-head")
+        RolePermission.objects.create(role=head_role, permission=manage_perm)
+
+        self.plain_doctor = User.objects.create(username="me_plain_doc")
+
+        # Doctor: ordinary own_branch grant — sees every department in
+        # the branch, same as everywhere else this project's doctors work.
+        self.doctor = User.objects.create(username="me_doctor")
+        UserRole.objects.create(user=self.doctor, role=doctor_role, branch_scope=BranchScope.OWN_BRANCH)
+        StaffBranchAssignment.objects.create(
+            staff=self.doctor, branch=self.branch_a, weekday=Weekday.MONDAY,
+            start_time=time(9, 0), end_time=time(17, 0),
+        )
+
+        # Department-head: SPECIFIC_BRANCHES with no branches attached —
+        # visibility comes only from StaffDepartmentAssignment (same
+        # provisioning convention as apps.inpatient.rbac's docstring).
+        self.head = User.objects.create(username="me_dept_head")
+        UserRole.objects.create(user=self.head, role=head_role, branch_scope=BranchScope.SPECIFIC_BRANCHES)
+        StaffDepartmentAssignment.objects.create(staff=self.head, department=self.dept_therapy)
+
+        self.tenant_host = self.domain.domain
+
+    def _me(self, user):
+        client = APIClient()
+        client.force_authenticate(user=user)
+        return client.get("/api/v1/me/", HTTP_HOST=self.tenant_host)
+
+    def test_plain_user_has_no_admission_departments(self):
+        response = self._me(self.plain_doctor)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["admission_departments"], [])
+
+    def test_doctor_sees_every_department_in_own_branch(self):
+        response = self._me(self.doctor)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            set(response.json()["admission_departments"]),
+            {self.dept_therapy.pk, self.dept_surgery.pk},
+        )
+
+    def test_department_head_sees_only_her_assigned_department(self):
+        response = self._me(self.head)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["admission_departments"], [self.dept_therapy.pk])
+
+
 class UsersWithPermissionTests(TenantTestCase):
     """Reverse lookup used by apps.referrals' escalate_stale_referrals:
     given a branch, who holds this permission there?"""

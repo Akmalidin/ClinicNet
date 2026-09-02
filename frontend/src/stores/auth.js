@@ -28,6 +28,11 @@ export const useAuthStore = defineStore('auth', {
     churnBranches: [],
     // inventory_branches: [id, ...] — same convention (WarehouseStockPage.vue).
     inventoryBranches: [],
+    // admission_departments: [id, ...] — one level deeper than the
+    // *_branches lists above: DEPARTMENT ids, not branches (see
+    // apps.inpatient.rbac's docstring). AdmissionIntakePage.vue's entry
+    // point and client-side guard.
+    admissionDepartments: [],
     ready: false,
   }),
   getters: {
@@ -47,6 +52,7 @@ export const useAuthStore = defineStore('auth', {
       this.triageBranches = []
       this.churnBranches = []
       this.inventoryBranches = []
+      this.admissionDepartments = []
     },
     async fetchMe() {
       const { data } = await meApi.get()
@@ -56,6 +62,7 @@ export const useAuthStore = defineStore('auth', {
       this.triageBranches = data.triage_branches ?? []
       this.churnBranches = data.churn_branches ?? []
       this.inventoryBranches = data.inventory_branches ?? []
+      this.admissionDepartments = data.admission_departments ?? []
     },
     // Called once on app boot: a stored access token doesn't mean it's
     // still valid, so this round-trips through /me/ (the request

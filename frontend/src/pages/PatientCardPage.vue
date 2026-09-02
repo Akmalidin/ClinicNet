@@ -6,8 +6,11 @@ import { insurancePoliciesApi, labOrdersApi, patientsApi, referralsApi, visitsAp
 import LabOrderModal from '../components/diagnostics/LabOrderModal.vue'
 import LabOrdersSection from '../components/diagnostics/LabOrdersSection.vue'
 import ReferralModal from '../components/referrals/ReferralModal.vue'
+import { useAuthStore } from '../stores/auth'
 
 const props = defineProps({ id: { type: [String, Number], required: true } })
+
+const auth = useAuthStore()
 
 const patient = ref(null)
 const visits = ref([])
@@ -151,6 +154,14 @@ function initials(p) {
               история по всей сети
             </div>
           </div>
+          <RouterLink
+            v-if="auth.admissionDepartments.length"
+            :to="{ name: 'admission-intake', params: { id: props.id } }"
+            class="btn btn-mint"
+            style="margin-left:auto;text-decoration:none"
+          >
+            Госпитализировать
+          </RouterLink>
         </div>
       </div>
 
