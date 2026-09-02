@@ -38,9 +38,24 @@ mkdir -p /var/www/clinicnet
 chown www-data:www-data /var/www/clinicnet
 cd /var/www/clinicnet
 sudo -u www-data git clone https://github.com/Akmalidin/ClinicNet.git .
-sudo -u www-data git checkout claude/phase2-emk-referrals-models   # до мержа PR в main
+sudo -u www-data git checkout claude/odontis-enterprise-phased-plan-tal1n4   # до мержа PR #19 в main
 sudo -u www-data python3 -m venv venv
 sudo -u www-data venv/bin/pip install -r requirements.txt
+```
+
+Фронтенд (Vue) собирается отдельно от Django — сам бэкенд его не отдаёт
+вообще (никакого catch-all/`TemplateView` в `config/urls.py`), это
+целиком забота nginx (см. `deploy/nginx/clinicnet-stom-asia`: `/api/` и
+`/admin/` идут в gunicorn, всё остальное — собранный SPA с фолбэком на
+`index.html`). Сборка кладётся в `/var/www/clinicnet/frontend-dist/` —
+путь, который тот vhost и ожидает:
+
+```bash
+cd /var/www/clinicnet/frontend
+sudo -u www-data npm ci
+sudo -u www-data npm run build
+sudo -u www-data rm -rf /var/www/clinicnet/frontend-dist
+sudo -u www-data cp -r dist /var/www/clinicnet/frontend-dist
 ```
 
 `.env` (владелец `www-data`, права `600` — секреты):
@@ -95,8 +110,14 @@ systemctl reload nginx   # reload, не restart — не рвёт соедине
 приоритетнее `*.stom.asia` (wildcard) в `sites-available/stom-asia` — запрос
 уйдёт в ClinicNet, SADAF не заденет.
 
+nginx (обычно `www-data` в его собственном воркер-процессе) должен иметь
+право на чтение `/var/www/clinicnet/frontend-dist/` — если каталог
+создавался под `www-data:www-data` (как и остальной `/var/www/clinicnet`
+в шаге 3), отдельно ничего настраивать не нужно.
+
 Проверить: `curl -I https://clinicnet.stom.asia/admin/` — ожидается `200`
-или `302` с валидным сертификатом.
+или `302` с валидным сертификатом; `curl -I https://clinicnet.stom.asia/`
+— `200` (отдаёт `index.html` собранного фронтенда).
 
 ## 6. Первый пользователь (администратор сети)
 
@@ -164,6 +185,15 @@ sudo -u www-data venv/bin/python manage.py migrate_schemas --shared --noinput
 sudo -u www-data venv/bin/python manage.py migrate_schemas --schema=clinicnet
 sudo -u www-data venv/bin/python manage.py tenant_command seed_rbac --schema=clinicnet
 systemctl restart clinicnet
+
+# Фронтенд — пересобирается на КАЖДОМ обновлении, не только когда точно
+# знаешь, что менялся frontend/: gunicorn его не отдаёт вообще, старая
+# сборка в frontend-dist/ иначе тихо продолжит обслуживаться nginx.
+cd /var/www/clinicnet/frontend
+sudo -u www-data npm ci
+sudo -u www-data npm run build
+sudo -u www-data rm -rf /var/www/clinicnet/frontend-dist
+sudo -u www-data cp -r dist /var/www/clinicnet/frontend-dist
 
 # Если менялся triage_service/ (не при каждом обновлении):
 sudo -u www-data /var/www/clinicnet/triage_venv/bin/pip install -r triage_service/requirements.txt
