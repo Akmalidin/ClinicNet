@@ -61,6 +61,12 @@ const routes = [
     component: () => import('../pages/StaffHrPage.vue'),
     meta: { requiresAuth: true },
   },
+  {
+    path: '/triage',
+    name: 'triage-queue',
+    component: () => import('../pages/TriageQueuePage.vue'),
+    meta: { requiresAuth: true },
+  },
 ]
 
 const router = createRouter({

@@ -75,6 +75,13 @@ onMounted(() => {
           Склад
         </RouterLink>
         <RouterLink
+          v-if="auth.triageBranches.length"
+          :to="{ name: 'triage-queue' }"
+          class="text-primary hover:underline"
+        >
+          Триаж
+        </RouterLink>
+        <RouterLink
           v-if="auth.roles.some((r) => r.role === 'Администратор сети')"
           :to="{ name: 'rbac-admin' }"
           class="text-primary hover:underline"
@@ -134,7 +141,12 @@ onMounted(() => {
              same requirement as ReferralQueueWidget, made explicit for
              this one because the AI-триаж manual test checklist calls
              it out directly (frontend prompt, "RBAC" section). -->
-        <h2 class="text-sm font-medium text-gray-500 mb-2">Очередь AI-триажа (сеть)</h2>
+        <h2 class="text-sm font-medium text-gray-500 mb-2">
+          Очередь AI-триажа (сеть) —
+          <RouterLink :to="{ name: 'triage-queue' }" class="text-primary hover:underline">
+            открыть полную очередь
+          </RouterLink>
+        </h2>
         <TriageQueueWidget />
       </section>
     </main>

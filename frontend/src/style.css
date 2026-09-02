@@ -90,3 +90,66 @@
 .mockup-page .locked-note{display:flex;align-items:center;gap:10px;background:var(--amber-l);border-radius:10px;padding:12px 16px;font-size:12.5px;color:var(--amber);font-weight:600;}
 .mockup-page .btn-complete{width:100%;padding:15px;border-radius:10px;background:var(--red);color:#fff;border:none;font-size:14px;font-weight:700;cursor:pointer;}
 .mockup-page .btn-complete:disabled{opacity:0.4;cursor:not-allowed;}
+
+/* Модалка направления */
+.mockup-modal-overlay{position:fixed;inset:0;background:rgba(31,58,82,0.18);display:flex;align-items:center;justify-content:center;z-index:40;padding:16px;}
+.mockup-modal{width:520px;max-width:100%;max-height:90vh;overflow-y:auto;background:var(--card);border-radius:18px;box-shadow:0 20px 60px rgba(31,58,82,0.18);}
+.mockup-modal .modal-head{padding:20px 24px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;}
+.mockup-modal .modal-head h3{font-size:17px;}
+.mockup-modal .close-x{width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;background:#F1EEE6;color:var(--ink-soft);cursor:pointer;border:none;}
+.mockup-modal .modal-body{padding:22px 24px;display:flex;flex-direction:column;gap:16px;}
+.mockup-modal .patient-strip{display:flex;align-items:center;gap:10px;background:var(--mint-l);border-radius:10px;padding:10px 14px;}
+.mockup-modal .field-label{font-size:11.5px;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;color:var(--ink-soft);margin-bottom:6px;}
+.mockup-modal .scope-toggle{display:flex;gap:8px;}
+.mockup-modal .scope-btn{flex:1;padding:9px;border-radius:9px;border:1px solid var(--line);background:#fff;text-align:center;font-size:12.5px;font-weight:600;cursor:pointer;}
+.mockup-modal .scope-btn.active{background:var(--navy);color:#fff;border-color:var(--navy);}
+.mockup-modal .select-field{width:100%;padding:11px 13px;border-radius:9px;border:1px solid var(--line);font-size:13px;color:var(--ink);background:#fff;font-family:inherit;}
+.mockup-modal .slots-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;}
+.mockup-modal .slot-btn{padding:10px 6px;border-radius:9px;border:1px solid var(--line);background:#fff;text-align:center;font-size:12px;font-family:'IBM Plex Mono',monospace;cursor:pointer;}
+.mockup-modal .slot-btn.selected{background:var(--mint);color:#fff;border-color:var(--mint);}
+.mockup-modal textarea{width:100%;padding:11px 13px;border-radius:9px;border:1px solid var(--line);font-size:13px;font-family:'Inter',sans-serif;resize:vertical;min-height:70px;}
+.mockup-modal .note-prefill{font-size:11px;color:var(--ink-soft);margin-top:5px;}
+.mockup-modal .priority-row{display:flex;gap:8px;}
+.mockup-modal .prio-chip{padding:7px 13px;border-radius:999px;font-size:12px;font-weight:600;border:1px solid var(--line);background:#fff;cursor:pointer;}
+.mockup-modal .prio-chip.active{background:var(--mint-l);border-color:var(--mint);color:var(--mint-d);}
+.mockup-modal .prio-chip.urgent.active{background:#FDF1E1;border-color:var(--amber);color:var(--amber);}
+.mockup-modal .prio-chip.emergency.active{background:var(--red-l);border-color:var(--red);color:var(--red);}
+
+/* Очередь триажа */
+.mockup-page .stats-row{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;}
+.mockup-page .stat{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px;}
+.mockup-page .stat-label{font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--ink-soft);}
+.mockup-page .stat-value{font-family:'IBM Plex Mono',monospace;font-size:24px;font-weight:600;color:var(--navy);margin-top:6px;}
+.mockup-page .section-label{font-size:11.5px;text-transform:uppercase;letter-spacing:0.06em;color:var(--ink-soft);margin-top:6px;}
+.mockup-page .queue{display:flex;flex-direction:column;gap:12px;}
+.mockup-page .suggestion{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 20px;display:grid;grid-template-columns:auto 1fr auto;gap:20px;align-items:start;}
+.mockup-page .suggestion.new{border-left:3px solid var(--mint);}
+.mockup-page .suggestion.uncertain{border-left:3px solid var(--amber);}
+.mockup-page .suggestion.history{opacity:0.6;align-items:center;}
+.mockup-page .patient-col{display:flex;flex-direction:column;gap:4px;min-width:150px;}
+.mockup-page .channel{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--ink-soft);}
+.mockup-page .channel-icon{width:16px;height:16px;border-radius:4px;background:#2AABEE;display:flex;align-items:center;justify-content:center;color:#fff;font-size:9px;font-weight:700;flex-shrink:0;}
+.mockup-page .patient-name{font-size:14.5px;font-weight:600;}
+.mockup-page .patient-time{font-size:11px;color:var(--ink-soft);}
+.mockup-page .middle-col{display:flex;flex-direction:column;gap:8px;}
+.mockup-page .complaint{font-size:13px;color:var(--ink);background:#FBFAF7;border:1px solid #F0EDE5;border-radius:10px;padding:9px 12px;font-style:italic;}
+.mockup-page .suggestion-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.mockup-page .tag{padding:4px 10px;border-radius:999px;font-size:11.5px;font-weight:600;}
+.mockup-page .tag.spec{background:var(--navy);color:#fff;}
+.mockup-page .tag.slot{background:var(--mint-l);color:var(--mint-d);}
+.mockup-page .tag.confidence{background:#EFECE3;color:var(--ink-soft);font-family:'IBM Plex Mono',monospace;font-weight:500;}
+.mockup-page .tag.confidence.low{background:var(--amber-l);color:var(--amber);}
+.mockup-page .actions-col{display:flex;flex-direction:column;gap:8px;min-width:150px;}
+.mockup-page .btn-confirm{background:var(--mint);color:#fff;}
+.mockup-page .btn-change{background:#fff;border:1px solid var(--line);color:var(--ink);}
+.mockup-page .btn-decline{background:#fff;border:1px solid var(--red);color:var(--red);}
+.mockup-page .status-pill{padding:3px 9px;border-radius:999px;font-size:11px;font-weight:600;white-space:nowrap;}
+.mockup-page .status-pill.confirmed{background:var(--mint-l);color:var(--mint-d);}
+.mockup-page .status-pill.declined{background:var(--red-l);color:var(--red);}
+.mockup-page .status-pill.expired{background:#EFECE3;color:var(--ink-soft);}
+.mockup-page .field-label{font-size:11.5px;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;color:var(--ink-soft);margin-bottom:6px;}
+.mockup-page .select-field{width:100%;padding:9px 12px;border-radius:9px;border:1px solid var(--line);font-size:12.5px;color:var(--ink);background:#fff;font-family:inherit;}
+.mockup-page .slots-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;}
+.mockup-page .slot-btn{padding:8px 4px;border-radius:8px;border:1px solid var(--line);background:#fff;text-align:center;font-size:11.5px;font-family:'IBM Plex Mono',monospace;cursor:pointer;}
+.mockup-page .slot-btn.selected{background:var(--mint);color:#fff;border-color:var(--mint);}
+.mockup-modal .modal-foot{padding:18px 24px;border-top:1px solid var(--line);display:flex;gap:10px;justify-content:flex-end;}

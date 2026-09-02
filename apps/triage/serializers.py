@@ -18,6 +18,7 @@ class TriageSuggestionSerializer(serializers.ModelSerializer):
             "id", "channel", "external_chat_id", "contact_name", "contact_phone", "symptom_text",
             "matched_specialty", "specialty_name", "branch", "branch_name",
             "suggested_doctor", "doctor_name", "suggested_starts_at", "suggested_ends_at",
+            "match_confidence",
             "status", "patient", "resulting_appointment",
             "confirmed_by", "confirmed_at", "rejection_reason",
             "matched_patient_candidate",

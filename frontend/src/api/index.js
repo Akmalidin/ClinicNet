@@ -63,7 +63,16 @@ export const referralsApi = {
 
 export const triageApi = {
   list: (params) => client.get('triage-suggestions/', { params }),
-  confirm: (id, patientId) => client.post(`triage-suggestions/${id}/confirm/`, { patient: patientId }),
+  // override — необязательный { doctor, startsAt, endsAt } для "Изменить
+  // слот": координатор подтверждает на другого врача/время, а не на то,
+  // что предложил бот. Либо все три поля вместе, либо ни одного.
+  confirm: (id, patientId, override) =>
+    client.post(`triage-suggestions/${id}/confirm/`, {
+      patient: patientId,
+      ...(override
+        ? { doctor: override.doctor, starts_at: override.startsAt, ends_at: override.endsAt }
+        : {}),
+    }),
   reject: (id, reason) => client.post(`triage-suggestions/${id}/reject/`, { reason }),
 }
 

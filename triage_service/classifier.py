@@ -29,17 +29,28 @@ class KeywordSpecialtyClassifier:
     """Zero-dependency default — substring match against KEYWORD_MAP,
     restricted to specialty codes that actually exist in this network's
     catalog (a keyword hit for a specialty the clinic doesn't have is not
-    a match)."""
+    a match).
 
-    def classify(self, symptom_text: str, specialties: list[dict]) -> str | None:
+    classify() returns (code, confidence) — confidence is a simple
+    "more keyword hits = more sure" heuristic (65% for one hit, +15%
+    per additional hit, capped at 95%), not a claim of clinical
+    accuracy — same "simple formula, not ML" spirit as apps.churn's
+    risk_score. It exists so the coordinator's queue can show them
+    something to weigh "уточнить/сменить слот" against, not to be
+    precise. (None, None) when nothing matched.
+    """
+
+    def classify(self, symptom_text: str, specialties: list[dict]) -> tuple[str | None, int | None]:
         text = symptom_text.lower()
         available_codes = {s["code"] for s in specialties}
         for code, keywords in KEYWORD_MAP.items():
             if code not in available_codes:
                 continue
-            if any(keyword in text for keyword in keywords):
-                return code
-        return None
+            hits = sum(1 for keyword in keywords if keyword in text)
+            if hits:
+                confidence = min(95, 65 + 15 * (hits - 1))
+                return code, confidence
+        return None, None
 
 
 class AnthropicSpecialtyClassifier:
@@ -55,10 +66,10 @@ class AnthropicSpecialtyClassifier:
 
         self._client = Anthropic(api_key=api_key)
 
-    def classify(self, symptom_text: str, specialties: list[dict]) -> str | None:
+    def classify(self, symptom_text: str, specialties: list[dict]) -> tuple[str | None, int | None]:
         codes = [s["code"] for s in specialties]
         if not codes:
-            return None
+            return None, None
         tool = {
             "name": "pick_specialty",
             "description": "Choose the dental specialty that best matches the patient's complaint.",
@@ -69,6 +80,10 @@ class AnthropicSpecialtyClassifier:
                         "type": "string",
                         "enum": codes,
                         "description": "The single best-matching specialty code, or omit if genuinely unclear.",
+                    },
+                    "confidence": {
+                        "type": "integer",
+                        "description": "How confident you are in this match, 0-100.",
                     },
                 },
             },
@@ -82,8 +97,15 @@ class AnthropicSpecialtyClassifier:
         )
         for block in response.content:
             if block.type == "tool_use" and block.name == "pick_specialty":
-                return block.input.get("specialty_code")
-        return None
+                code = block.input.get("specialty_code")
+                confidence = block.input.get("confidence")
+                if code is None:
+                    return None, None
+                # Model-reported, not independently verified — clamp to
+                # the valid range rather than trust it blindly.
+                confidence = max(0, min(100, int(confidence))) if confidence is not None else None
+                return code, confidence
+        return None, None
 
 
 def get_classifier(anthropic_api_key: str):
