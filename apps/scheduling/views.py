@@ -53,15 +53,28 @@ class AppointmentViewSet(viewsets.ModelViewSet):
         # ?date=YYYY-MM-DD — найдено при разведке multibranchschedule.html:
         # расписание по СЕТИ на один день не вытянуть иначе (filterset_
         # fields — только exact-match, starts_at там нет и точное
-        # совпадение с datetime всё равно бесполезно). Единственный
-        # календарный фильтр, который сейчас реально нужен клиенту, —
-        # день целиком; диапазон/gte-lte не добавляем, пока нет
-        # экрана, которому он нужен.
+        # совпадение с datetime всё равно бесполезно).
         date_param = self.request.query_params.get("date")
         if date_param:
             parsed = parse_date(date_param)
             if parsed:
                 qs = qs.filter(starts_at__date=parsed)
+        # ?date_from=/?date_to=YYYY-MM-DD — найдено при разведке
+        # networkanalytics.html: "воронка приёма" за 30 дней сетью не
+        # вытянуть однодневным ?date= выше, а тянуть всё и резать на
+        # клиенте не хотелось (тот же принцип, что уже привёл к ?date=
+        # и AppointmentViewSet.utilization — фильтрация на бэкенде, не
+        # на клиенте). Тот же naming convention, что FinanceReportView.
+        date_from = self.request.query_params.get("date_from")
+        date_to = self.request.query_params.get("date_to")
+        if date_from:
+            parsed = parse_date(date_from)
+            if parsed:
+                qs = qs.filter(starts_at__date__gte=parsed)
+        if date_to:
+            parsed = parse_date(date_to)
+            if parsed:
+                qs = qs.filter(starts_at__date__lte=parsed)
         return qs
 
     @action(detail=False, methods=["get"], required_permission="appointment.view")

@@ -8,6 +8,7 @@ from .views import (
     InsurancePolicyViewSet,
     InsuranceProviderViewSet,
     InvoiceViewSet,
+    LtvCohortReportView,
     PaymentViewSet,
     ServiceViewSet,
 )
@@ -22,5 +23,6 @@ router.register("insurance-policies", InsurancePolicyViewSet, basename="insuranc
 
 urlpatterns = [
     path("finance/report/", FinanceReportView.as_view(), name="finance-report"),
+    path("finance/ltv-cohorts/", LtvCohortReportView.as_view(), name="finance-ltv-cohorts"),
     path("", include(router.urls)),
 ]

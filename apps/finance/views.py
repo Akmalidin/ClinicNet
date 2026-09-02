@@ -1,7 +1,7 @@
 from decimal import Decimal, InvalidOperation
 
 from django.core.exceptions import ValidationError as DjangoValidationError
-from django.db.models import F, Q, Sum
+from django.db.models import Count, F, Min, Q, Sum
 from django.db.models.functions import Coalesce
 from rest_framework import generics
 from rest_framework import serializers as drf_serializers
@@ -389,3 +389,62 @@ class FinanceReportView(generics.GenericAPIView):
 
         network_total = sum((row["net"] for row in by_branch), ZERO)
         return Response({"by_branch": by_branch, "network_total": network_total})
+
+
+class LtvCohortReportView(generics.GenericAPIView):
+    """LTV пациентов по когорте (квартал первого визита) —
+    networkanalytics.html. Найдено при разведке: такого разреза нигде не
+    было — не воронка CRM (обращения/лиды в системе не моделируются
+    вообще, см. NetworkAnalyticsPage.vue's докстринг про честную
+    2-этапную замену), а именно то, что реально считается из Visit +
+    Payment: квартал первого визита пациента, средняя выручка на
+    пациента когорты и среднее число визитов.
+
+    Только ALL-scope finance.view (HasNetworkWidePermission) — иначе
+    "выручка на пациента" смешивала бы платежи из филиалов, куда у
+    смотрящего нет доступа, с теми, куда есть, тем же способом, каким
+    FinanceReportView вместо этого разбивает по филиалу, не блендит.
+    """
+
+    permission_classes = [HasNetworkWidePermission]
+    required_permission = "finance.view"
+
+    def get(self, request):
+        from apps.visits.models import Visit
+
+        allowed_branches = branches_for_permission(request.user, "finance.view")
+
+        first_visit_by_patient = (
+            Visit.objects.filter(branch__in=allowed_branches)
+            .values("patient")
+            .annotate(first_visit_at=Min("created_at"), visit_count=Count("id"))
+        )
+        revenue_by_patient = dict(
+            Payment.objects.filter(kind=PaymentKind.PAYMENT, branch__in=allowed_branches)
+            .values("invoice__patient")
+            .annotate(total=Sum("amount"))
+            .values_list("invoice__patient", "total")
+        )
+
+        cohorts = {}
+        for row in first_visit_by_patient:
+            dt = row["first_visit_at"]
+            quarter_num = (dt.month - 1) // 3 + 1
+            key = (dt.year, quarter_num)  # sortable chronologically — the display label alone isn't (Q4 2024 < Q1 2025)
+            bucket = cohorts.setdefault(
+                key, {"label": f"Q{quarter_num} {dt.year}", "patients": 0, "visits": 0, "revenue": ZERO}
+            )
+            bucket["patients"] += 1
+            bucket["visits"] += row["visit_count"]
+            bucket["revenue"] += revenue_by_patient.get(row["patient"], ZERO)
+
+        data = [
+            {
+                "quarter": bucket["label"],
+                "patient_count": bucket["patients"],
+                "avg_ltv": round(bucket["revenue"] / bucket["patients"], 2),
+                "avg_visits": round(bucket["visits"] / bucket["patients"], 2),
+            }
+            for _, bucket in sorted(cohorts.items())
+        ]
+        return Response(data)

@@ -99,6 +99,12 @@ const routes = [
     component: () => import('../pages/NetworkDashboardPage.vue'),
     meta: { requiresAuth: true },
   },
+  {
+    path: '/network-analytics',
+    name: 'network-analytics',
+    component: () => import('../pages/NetworkAnalyticsPage.vue'),
+    meta: { requiresAuth: true },
+  },
 ]
 
 const router = createRouter({

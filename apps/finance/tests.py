@@ -1,7 +1,8 @@
-from datetime import date, time, timedelta
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError
+from django.utils import timezone
 from django_tenants.test.cases import TenantTestCase
 from rest_framework.test import APIClient
 
@@ -294,6 +295,102 @@ class InvoiceAPITests(TenantTestCase):
         report_b = client_b.get("/api/v1/finance/report/", HTTP_HOST=self.host)
         self.assertEqual(report_b.data["by_branch"], [])
         self.assertEqual(Decimal(report_b.data["network_total"]), Decimal("0"))
+
+
+class LtvCohortReportAPITests(TenantTestCase):
+    """LtvCohortReportView — networkanalytics.html's LTV когорты по
+    кварталу первого визита. ALL-scope only (HasNetworkWidePermission),
+    same reasoning as FinanceReportView's own branch-scoping docstring:
+    an own_branch grant blending "выручка на пациента" across only some
+    of a patient's branches would be misleading, not just incomplete."""
+
+    def setUp(self):
+        from apps.visits.models import Visit
+
+        self.Visit = Visit
+        self.branch = Branch.objects.create(name="Филиал А", code="a")
+
+        view_perm = Permission.objects.create(code="finance.view", category="finance")
+        network_admin_role = Role.objects.create(name="Администратор сети", codename="network-admin")
+        RolePermission.objects.create(role=network_admin_role, permission=view_perm)
+
+        own_branch_role = Role.objects.create(name="Кассир", codename="cashier")
+        RolePermission.objects.create(role=own_branch_role, permission=view_perm)
+
+        self.network_admin = User.objects.create(username="net_admin")
+        UserRole.objects.create(user=self.network_admin, role=network_admin_role, branch_scope=BranchScope.ALL)
+
+        self.cashier = User.objects.create(username="cashier_ltv")
+        UserRole.objects.create(user=self.cashier, role=own_branch_role, branch_scope=BranchScope.OWN_BRANCH)
+        StaffBranchAssignment.objects.create(
+            staff=self.cashier, branch=self.branch, weekday=Weekday.MONDAY,
+            start_time=time(9, 0), end_time=time(18, 0),
+        )
+
+        self.doctor = User.objects.create(username="doc_ltv")
+        self.host = self.domain.domain
+
+    def _client_for(self, user):
+        client = APIClient()
+        client.force_authenticate(user=user)
+        return client
+
+    def _patient_with_history(self, first_visit_on, visit_count, payment_total):
+        patient = Patient.objects.create(first_name="Пациент", last_name=str(first_visit_on))
+        for i in range(visit_count):
+            visit = self.Visit.objects.create(
+                patient=patient, doctor=self.doctor, branch=self.branch, reason="Осмотр",
+            )
+            backdated = timezone.make_aware(datetime.combine(first_visit_on, time(9, 0))) + timedelta(days=30 * i)
+            self.Visit.objects.filter(pk=visit.pk).update(created_at=backdated)
+        if payment_total:
+            invoice = Invoice.objects.create(
+                patient=patient, branch=self.branch, status=InvoiceStatus.ISSUED, issued_by=self.doctor,
+            )
+            InvoiceLine.objects.create(invoice=invoice, description="Приём", quantity=1, unit_price=payment_total)
+            Payment.objects.create(
+                invoice=invoice, branch=self.branch, received_by=self.doctor,
+                kind=PaymentKind.PAYMENT, amount=payment_total,
+            )
+        return patient
+
+    def test_network_admin_sees_cohorts_grouped_by_quarter_of_first_visit(self):
+        self._patient_with_history(date(2026, 1, 15), visit_count=2, payment_total="10000")
+        self._patient_with_history(date(2026, 1, 20), visit_count=4, payment_total="20000")
+        self._patient_with_history(date(2026, 4, 5), visit_count=1, payment_total="6000")
+
+        client = self._client_for(self.network_admin)
+        response = client.get("/api/v1/finance/ltv-cohorts/", HTTP_HOST=self.host)
+        self.assertEqual(response.status_code, 200, response.data)
+        by_quarter = {row["quarter"]: row for row in response.data}
+
+        self.assertIn("Q1 2026", by_quarter)
+        q1 = by_quarter["Q1 2026"]
+        self.assertEqual(q1["patient_count"], 2)
+        self.assertEqual(Decimal(str(q1["avg_ltv"])), Decimal("15000.00"))  # (10000+20000)/2
+        self.assertEqual(Decimal(str(q1["avg_visits"])), Decimal("3.00"))  # (2+4)/2
+
+        self.assertIn("Q2 2026", by_quarter)
+        q2 = by_quarter["Q2 2026"]
+        self.assertEqual(q2["patient_count"], 1)
+        self.assertEqual(Decimal(str(q2["avg_ltv"])), Decimal("6000.00"))
+
+    def test_quarters_sorted_chronologically_across_year_boundary(self):
+        """Would break with a naive string sort — "Q4 2025" > "Q1 2026"
+        alphabetically even though it's chronologically earlier."""
+        self._patient_with_history(date(2025, 11, 1), visit_count=1, payment_total="1000")
+        self._patient_with_history(date(2026, 1, 5), visit_count=1, payment_total="1000")
+
+        client = self._client_for(self.network_admin)
+        response = client.get("/api/v1/finance/ltv-cohorts/", HTTP_HOST=self.host)
+        self.assertEqual(response.status_code, 200, response.data)
+        quarters = [row["quarter"] for row in response.data]
+        self.assertEqual(quarters, ["Q4 2025", "Q1 2026"])
+
+    def test_own_branch_scope_cannot_access_ltv_cohorts(self):
+        client = self._client_for(self.cashier)
+        response = client.get("/api/v1/finance/ltv-cohorts/", HTTP_HOST=self.host)
+        self.assertEqual(response.status_code, 403)
 
 
 class BonusPaymentTests(TenantTestCase):

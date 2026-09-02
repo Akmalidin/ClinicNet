@@ -37,10 +37,10 @@ export const appointmentsApi = {
   // Used by ReferralQueueWidget's "Забронировать" action: books the actual
   // calendar slot, then referralsApi.schedule() links it to the referral.
   create: (data) => client.post('appointments/', data),
-  // params can include branch/doctor/patient/status (exact-match) and
-  // date (YYYY-MM-DD, whole-day filter — see AppointmentViewSet.
-  // get_queryset) — used by MultiBranchSchedulePage.vue for a single
-  // network-wide day.
+  // params can include branch/doctor/patient/status (exact-match), date
+  // (YYYY-MM-DD, whole-day filter — MultiBranchSchedulePage.vue), and
+  // date_from/date_to (inclusive range — NetworkAnalyticsPage.vue's
+  // 30-day booking funnel) — see AppointmentViewSet.get_queryset.
   list: (params) => client.get('appointments/', { params }),
   // Загрузка врачей за день (booked/available минут) — см.
   // AppointmentViewSet.utilization's докстринг.
@@ -51,6 +51,9 @@ export const financeReportApi = {
   // apps.finance.views.FinanceReportView — per-branch payments/refunds
   // net total for an optional date range, scoped to finance.view branches.
   get: (params) => client.get('finance/report/', { params }),
+  // apps.finance.views.LtvCohortReportView — patient LTV by quarter of
+  // first visit, ALL-scope finance.view only (see the view's docstring).
+  ltvCohorts: () => client.get('finance/ltv-cohorts/'),
 }
 
 export const specialtiesApi = {

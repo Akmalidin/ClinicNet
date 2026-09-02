@@ -191,6 +191,27 @@ class AppointmentDateFilterAPITests(TenantTestCase):
         ids = {row["id"] for row in response.json()}
         self.assertEqual(ids, {self.today_appt.pk, self.tomorrow_appt.pk})
 
+    def test_date_from_to_range_filter(self):
+        """?date_from=/?date_to= — найдено при разведке
+        networkanalytics.html (воронка приёма за 30 дней)."""
+        response = self.client_api.get(
+            "/api/v1/appointments/",
+            {"date_from": self.today.date().isoformat(), "date_to": self.today.date().isoformat()},
+            HTTP_HOST=self.host,
+        )
+        self.assertEqual(response.status_code, 200)
+        ids = {row["id"] for row in response.json()}
+        self.assertEqual(ids, {self.today_appt.pk})
+
+        wide = self.client_api.get(
+            "/api/v1/appointments/",
+            {"date_from": self.today.date().isoformat(), "date_to": self.tomorrow_appt.starts_at.date().isoformat()},
+            HTTP_HOST=self.host,
+        )
+        self.assertEqual(wide.status_code, 200)
+        ids = {row["id"] for row in wide.json()}
+        self.assertEqual(ids, {self.today_appt.pk, self.tomorrow_appt.pk})
+
 
 class AppointmentUtilizationAPITests(TenantTestCase):
     """AppointmentViewSet.utilization — найдено при разведке
