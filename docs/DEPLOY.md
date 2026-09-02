@@ -48,7 +48,17 @@ sudo -u www-data venv/bin/pip install -r requirements.txt
 целиком забота nginx (см. `deploy/nginx/clinicnet-stom-asia`: `/api/` и
 `/admin/` идут в gunicorn, всё остальное — собранный SPA с фолбэком на
 `index.html`). Сборка кладётся в `/var/www/clinicnet/frontend-dist/` —
-путь, который тот vhost и ожидает:
+путь, который тот vhost и ожидает. Требует Node.js — на сервере до этого
+ставился только Python-стек (SADAF/ERP/CRM — все на gunicorn), так что
+`npm` может не быть вообще; проверить `node -v` и при отсутствии
+поставить один раз на весь сервер (Node 20 LTS, systemwide — как и
+Python-стек, не per-app):
+
+```bash
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get install -y nodejs
+node -v && npm -v   # v20.x / 10.x
+```
 
 ```bash
 cd /var/www/clinicnet/frontend
