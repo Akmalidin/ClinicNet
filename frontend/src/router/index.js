@@ -80,6 +80,13 @@ const routes = [
     component: () => import('../pages/BedManagementPage.vue'),
     meta: { requiresAuth: true },
   },
+  {
+    path: '/admissions/:id/vitals',
+    name: 'vitals-chart',
+    component: () => import('../pages/VitalsChartPage.vue'),
+    props: true,
+    meta: { requiresAuth: true },
+  },
 ]
 
 const router = createRouter({

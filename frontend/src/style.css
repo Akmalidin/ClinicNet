@@ -191,4 +191,14 @@
 .mockup-page .bed.occupied{background:var(--red);}
 .mockup-page .bed.reserved{background:var(--amber);color:#3B2E14;}
 .mockup-page .bed.cleaning{background:var(--slate);}
+
+/* Лист наблюдения */
+.mockup-page .btn-add{padding:10px 16px;border-radius:9px;background:var(--mint);color:#fff;border:none;font-size:13px;font-weight:600;cursor:pointer;}
+.mockup-page .vitals-table{width:100%;border-collapse:collapse;}
+.mockup-page .vitals-table th{background:#FBFAF7;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:0.04em;color:var(--ink-soft);padding:11px 12px;border-bottom:1px solid var(--line);}
+.mockup-page .vitals-table td{padding:12px;border-bottom:1px solid #F1EEE6;font-size:13px;}
+.mockup-page .vitals-table tr:last-child td{border-bottom:none;}
+.mockup-page .vitals-table .val{font-family:'IBM Plex Mono',monospace;font-weight:600;}
+.mockup-page .vitals-table .val.warn{color:var(--red);}
+.mockup-page .vitals-table .by{font-size:11px;color:var(--ink-soft);}
 .mockup-modal .modal-foot{padding:18px 24px;border-top:1px solid var(--line);display:flex;gap:10px;justify-content:flex-end;}

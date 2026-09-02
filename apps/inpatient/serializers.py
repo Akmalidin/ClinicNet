@@ -205,7 +205,7 @@ class VitalsRecordSerializer(serializers.ModelSerializer):
         model = VitalsRecord
         fields = (
             "id", "admission", "recorded_by", "recorded_by_name",
-            "blood_pressure_systolic", "blood_pressure_diastolic", "pulse", "temperature",
+            "blood_pressure_systolic", "blood_pressure_diastolic", "pulse", "temperature", "spo2",
             "note", "recorded_at",
         )
         # Append-only — VitalsRecordViewSet has no update/destroy at all
@@ -220,6 +220,7 @@ class VitalsRecordSerializer(serializers.ModelSerializer):
             blood_pressure_diastolic=attrs.get("blood_pressure_diastolic"),
             pulse=attrs.get("pulse"),
             temperature=attrs.get("temperature"),
+            spo2=attrs.get("spo2"),
         )
         try:
             instance.clean()

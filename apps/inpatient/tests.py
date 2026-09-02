@@ -493,7 +493,7 @@ class AdmissionAPIRBACTests(TenantTestCase):
     def test_bed_board_shows_occupied_beds_with_the_real_patient(self):
         """.view-gated (nurse holds it, unlike .manage above) — the board
         is for anyone who can see admissions, not only who can create one."""
-        admit_patient(
+        admission = admit_patient(
             patient=self.patient, department=self.dept_therapy, bed=self.bed_therapy,
             attending_doctor=self.doctor, admitted_by=self.doctor, diagnosis_at_admission="ОРВИ",
         )
@@ -505,6 +505,7 @@ class AdmissionAPIRBACTests(TenantTestCase):
         bed_row = next(b for b in dept_row["rooms"][0]["beds"] if b["id"] == self.bed_therapy.pk)
         self.assertEqual(bed_row["status"], BedStatus.OCCUPIED)
         self.assertEqual(bed_row["patient_name"], str(self.patient))
+        self.assertEqual(bed_row["admission_id"], admission.pk)
         self.assertEqual(response.data["occupancy"][BedStatus.OCCUPIED], 1)
         self.assertEqual(response.data["total_beds"], 1)  # nurse only reaches her own department's bed
 
@@ -516,6 +517,7 @@ class AdmissionAPIRBACTests(TenantTestCase):
         bed_row = next(b for b in dept_row["rooms"][0]["beds"] if b["id"] == self.bed_therapy.pk)
         self.assertEqual(bed_row["status"], BedStatus.FREE)
         self.assertIsNone(bed_row["patient_name"])
+        self.assertIsNone(bed_row["admission_id"])
 
 
 class TransferServiceTests(TenantTestCase):
@@ -905,6 +907,15 @@ class VitalsRecordModelTests(TenantTestCase):
         with self.assertRaises(ValidationError):
             record.full_clean()
 
+    def test_spo2_alone_is_enough(self):
+        record = VitalsRecord(admission=self.admission, recorded_by=self.nurse, spo2=97)
+        record.full_clean()  # does not raise
+
+    def test_spo2_over_100_percent_rejected(self):
+        record = VitalsRecord(admission=self.admission, recorded_by=self.nurse, spo2=101)
+        with self.assertRaises(ValidationError):
+            record.full_clean()
+
 
 class VitalsRecordAPIRBACTests(TenantTestCase):
     def setUp(self):
@@ -966,6 +977,14 @@ class VitalsRecordAPIRBACTests(TenantTestCase):
         )
         self.assertEqual(response.status_code, 201, response.data)
         self.assertEqual(response.data["recorded_by"], self.nurse_therapy.pk)
+
+    def test_nurse_records_spo2(self):
+        client = self._client_for(self.nurse_therapy)
+        response = client.post(
+            "/api/v1/vitals-records/", {"admission": self.admission.pk, "spo2": 96}, HTTP_HOST=self.host,
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["spo2"], 96)
 
     def test_empty_measurement_rejected_via_api(self):
         client = self._client_for(self.nurse_therapy)

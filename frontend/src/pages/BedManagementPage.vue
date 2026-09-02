@@ -1,5 +1,6 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { RouterLink } from 'vue-router'
 
 import { admissionsApi } from '../api'
 
@@ -105,15 +106,26 @@ function departmentBedCount(department) {
               <span class="room-cnt mono">{{ roomBedCount(room) }} коек</span>
             </div>
             <div class="beds">
-              <div
-                v-for="bed in room.beds"
-                :key="bed.id"
-                class="bed"
-                :class="bed.status"
-                :title="bed.patient_name || STATUS_LABELS[bed.status]"
-              >
-                {{ room.name }}-{{ bed.label }}
-              </div>
+              <template v-for="bed in room.beds" :key="bed.id">
+                <RouterLink
+                  v-if="bed.admission_id"
+                  :to="{ name: 'vitals-chart', params: { id: bed.admission_id } }"
+                  class="bed"
+                  :class="bed.status"
+                  :title="`${bed.patient_name} — открыть лист наблюдения`"
+                  style="text-decoration:none"
+                >
+                  {{ room.name }}-{{ bed.label }}
+                </RouterLink>
+                <div
+                  v-else
+                  class="bed"
+                  :class="bed.status"
+                  :title="bed.patient_name || STATUS_LABELS[bed.status]"
+                >
+                  {{ room.name }}-{{ bed.label }}
+                </div>
+              </template>
             </div>
           </div>
           <p v-if="department.rooms.length === 0" style="font-size:12px;color:var(--ink-soft)">В отделении нет палат.</p>

@@ -1,4 +1,5 @@
 from django.core.exceptions import ValidationError
+from django.core.validators import MaxValueValidator
 from django.db import models
 from django.utils import timezone
 
@@ -443,6 +444,14 @@ class VitalsRecord(models.Model):
     temperature = models.DecimalField(
         max_digits=4, decimal_places=1, null=True, blank=True, verbose_name="Температура"
     )
+    # Найдено при разведке vitalschart.html — сатурация (SpO₂) в макете
+    # есть отдельной колонкой, в модели её не было вообще (только АД/
+    # пульс/температура). Проценты, как и остальные показатели —
+    # необязательное поле, но валидируем диапазон 0-100 (clean() ниже),
+    # это не просто число, а физический процент.
+    spo2 = models.PositiveSmallIntegerField(
+        null=True, blank=True, validators=[MaxValueValidator(100)], verbose_name="Сатурация (SpO₂), %"
+    )
     note = models.CharField(max_length=255, blank=True)
     recorded_at = models.DateTimeField(auto_now_add=True)
 
@@ -463,6 +472,7 @@ class VitalsRecord(models.Model):
             self.blood_pressure_diastolic is not None,
             self.pulse is not None,
             self.temperature is not None,
+            self.spo2 is not None,
         ]):
             raise ValidationError("Нужно указать хотя бы один показатель.")
         if self.admission_id and self.admission.status != AdmissionStatus.ACTIVE:

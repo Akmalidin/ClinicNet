@@ -141,6 +141,13 @@ export const admissionsApi = {
   bedBoard: () => client.get('admissions/bed_board/'),
 }
 
+export const vitalsApi = {
+  // apps.inpatient.views.VitalsRecordViewSet — append-only, create/list/
+  // retrieve only (see the model's docstring), потому нет update/delete.
+  list: (admissionId) => client.get('vitals-records/', { params: { admission: admissionId } }),
+  create: (data) => client.post('vitals-records/', data),
+}
+
 export const operationsApi = {
   // apps.inpatient.views.OperationViewSet — checklist actions take no
   // body (POST {}), see apps/inpatient/tests.py's

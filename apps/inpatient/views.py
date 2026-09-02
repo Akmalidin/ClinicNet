@@ -291,8 +291,8 @@ class AdmissionViewSet(viewsets.ModelViewSet):
         rooms = Room.objects.filter(department__in=departments, is_active=True).select_related("department")
         beds = Bed.objects.filter(room__in=rooms).order_by("label")
 
-        patient_by_bed = {
-            admission.bed_id: str(admission.patient)
+        active_admission_by_bed = {
+            admission.bed_id: admission
             for admission in Admission.objects.filter(
                 bed__in=beds, status=AdmissionStatus.ACTIVE
             ).select_related("patient")
@@ -302,9 +302,13 @@ class AdmissionViewSet(viewsets.ModelViewSet):
         occupancy = {choice: 0 for choice in BedStatus.values}
         for bed in beds:
             occupancy[bed.status] += 1
+            active_admission = active_admission_by_bed.get(bed.pk)
             beds_by_room.setdefault(bed.room_id, []).append({
                 "id": bed.pk, "label": bed.label, "status": bed.status,
-                "patient_name": patient_by_bed.get(bed.pk),
+                "patient_name": str(active_admission.patient) if active_admission else None,
+                # Клика на занятую койку достаточно, чтобы уйти в лист
+                # наблюдения (vitalschart.html) — id нужен, не только имя.
+                "admission_id": active_admission.pk if active_admission else None,
             })
         rooms_by_department = {}
         for room in rooms:
