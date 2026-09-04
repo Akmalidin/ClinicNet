@@ -9,6 +9,7 @@ from .views import (
     PermissionViewSet,
     RoleViewSet,
     SpecialtyViewSet,
+    StaffDirectoryView,
     UserRoleViewSet,
 )
 
@@ -23,5 +24,6 @@ urlpatterns = [
     path("auth/token/", TokenObtainPairView.as_view(), name="token_obtain_pair"),
     path("auth/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
     path("me/", MeView.as_view(), name="me"),
+    path("staff/", StaffDirectoryView.as_view(), name="staff-directory"),
     path("", include(router.urls)),
 ]

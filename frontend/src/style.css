@@ -2,7 +2,7 @@
 @import 'tailwindcss/components';
 @import 'tailwindcss/utilities';
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
 
 /* Ported from Akmalidin/dental (frontend/src/style.css) — same component
    classes so referral UI reads as part of the same product family. */
@@ -25,3 +25,255 @@
   .badge-red { @apply bg-red-100 text-red-700 text-xs px-2 py-0.5 rounded-full; }
   .badge-gray { @apply bg-gray-100 text-gray-600 text-xs px-2 py-0.5 rounded-full; }
 }
+
+/* --------------------------------------------------------------------
+   "Мокап"-дизайн-система — ported verbatim from the client-supplied HTML
+   mockups (Fraunces/Inter/IBM Plex Mono, mint/navy/amber/red palette).
+   Deliberately kept separate from the Tailwind @apply classes above
+   (btn-primary/card/badge-*, used by ReferralQueueWidget/TriageQueueWidget)
+   rather than unifying them — that's a design-system migration of its
+   own, out of scope for just porting these screens. New module pages
+   (Стационар/операции, RBAC-админ, отток, склад, касса, карта пациента,
+   персонал) use these classes; existing widgets are untouched. */
+.mockup-page{
+  --mint:#2F8F73;--mint-d:#256F5A;--mint-l:#E7F3EE;--navy:#1F3A52;
+  --amber:#B9812E;--amber-l:#FDF1E1;--red:#B24632;--red-l:#F7E7E3;
+  --slate:#8A94A6;--slate-l:#EDEFF3;
+  --bg:#F7F6F2;--card:#FFFFFF;--line:#E7E3DA;--ink:#1C2320;--ink-soft:#5B6660;
+  background:var(--bg);color:var(--ink);font-family:'Inter',sans-serif;font-size:14px;
+  -webkit-font-smoothing:antialiased;min-height:100vh;
+}
+.mockup-page h1,.mockup-page h2,.mockup-page h3{font-family:'Fraunces',serif;font-weight:600;letter-spacing:-0.01em;}
+.mockup-page .mono{font-family:'IBM Plex Mono',monospace;}
+.mockup-page .topbar{display:flex;align-items:center;justify-content:space-between;padding:18px 32px;border-bottom:1px solid var(--line);background:var(--card);}
+.mockup-page .topbar h1{font-size:22px;} .mockup-page .topbar .meta{font-size:12px;color:var(--ink-soft);margin-top:2px;}
+.mockup-page .toolbar{display:flex;gap:10px;padding:14px 32px;background:var(--card);border-bottom:1px solid var(--line);}
+.mockup-page .chip{padding:7px 13px;border-radius:999px;font-size:12.5px;font-weight:600;border:1px solid var(--line);color:var(--ink-soft);background:#fff;cursor:pointer;}
+.mockup-page .chip.active{background:var(--navy);color:#fff;border-color:var(--navy);}
+.mockup-page .content{padding:24px 32px;display:flex;flex-direction:column;gap:14px;}
+.mockup-page .panel{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:22px;}
+.mockup-page .panel-title{display:flex;align-items:center;gap:10px;margin-bottom:16px;}
+.mockup-page .panel-title h3{font-size:15.5px;}
+.mockup-page .panel-title .n{width:26px;height:26px;border-radius:8px;background:var(--mint);color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;}
+.mockup-page .avatar{width:38px;height:38px;border-radius:50%;background:var(--navy);color:#fff;font-family:'Fraunces',serif;font-weight:600;font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.mockup-page .avatar-lg{width:52px;height:52px;border-radius:50%;background:var(--navy);color:#fff;font-family:'Fraunces',serif;font-weight:600;font-size:18px;display:flex;align-items:center;justify-content:center;}
+.mockup-page .pill{padding:2px 9px;border-radius:999px;font-size:10.5px;font-weight:600;}
+.mockup-page .pill.ok{background:var(--mint-l);color:var(--mint-d);}
+.mockup-page .pill.low{background:var(--amber-l);color:var(--amber);}
+.mockup-page .pill.crit,.mockup-page .pill.abnormal{background:var(--red-l);color:var(--red);}
+.mockup-page .btn{padding:10px 16px;border-radius:9px;font-size:13px;font-weight:600;border:none;cursor:pointer;}
+.mockup-page .btn-mint{background:var(--mint);color:#fff;}
+.mockup-page .btn-outline{background:#fff;border:1px solid var(--line);color:var(--ink);}
+.mockup-page .btn:disabled{opacity:0.4;cursor:not-allowed;}
+
+/* Чек-лист операции */
+.mockup-page .status-badge{padding:6px 14px;border-radius:999px;font-size:12px;font-weight:700;background:var(--amber-l);color:var(--amber);}
+.mockup-page .status-badge.done{background:var(--mint-l);color:var(--mint-d);}
+.mockup-page .op-content{padding:26px 32px;max-width:760px;margin:0 auto;display:flex;flex-direction:column;gap:18px;}
+.mockup-page .phase-track{display:flex;align-items:center;gap:0;margin-bottom:6px;}
+.mockup-page .phase-step{flex:1;text-align:center;position:relative;}
+.mockup-page .phase-step .circle{width:34px;height:34px;border-radius:50%;background:#fff;border:2px solid var(--line);display:flex;align-items:center;justify-content:center;margin:0 auto 8px;font-weight:700;font-size:13px;color:var(--ink-soft);}
+.mockup-page .phase-step.done .circle{background:var(--mint);border-color:var(--mint);color:#fff;}
+.mockup-page .phase-step.active .circle{background:var(--amber);border-color:var(--amber);color:#fff;}
+.mockup-page .phase-step .lbl{font-size:11.5px;font-weight:600;color:var(--ink-soft);}
+.mockup-page .phase-step.done .lbl,.mockup-page .phase-step.active .lbl{color:var(--ink);}
+.mockup-page .phase-line{position:absolute;top:17px;left:50%;width:100%;height:2px;background:var(--line);z-index:-1;}
+.mockup-page .phase-step.done .phase-line{background:var(--mint);}
+.mockup-page .check-item{display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid #F1EEE6;}
+.mockup-page .check-item:last-child{border-bottom:none;}
+.mockup-page .checkbox{width:22px;height:22px;border-radius:6px;border:2px solid var(--mint);background:var(--mint);color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0;cursor:pointer;}
+.mockup-page .checkbox.empty{background:#fff;border-color:var(--line);}
+.mockup-page .checkbox.disabled{cursor:not-allowed;opacity:0.6;}
+.mockup-page .check-text{font-size:13.5px;} .mockup-page .check-sub{font-size:11px;color:var(--ink-soft);margin-top:1px;}
+.mockup-page .team-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;}
+.mockup-page .team-chip{display:flex;align-items:center;gap:6px;background:#FBFAF7;border:1px solid #F0EDE5;border-radius:999px;padding:5px 11px 5px 5px;font-size:11.5px;}
+.mockup-page .team-avatar{width:22px;height:22px;border-radius:50%;background:var(--navy);color:#fff;font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center;}
+.mockup-page .locked-note{display:flex;align-items:center;gap:10px;background:var(--amber-l);border-radius:10px;padding:12px 16px;font-size:12.5px;color:var(--amber);font-weight:600;}
+.mockup-page .btn-complete{width:100%;padding:15px;border-radius:10px;background:var(--red);color:#fff;border:none;font-size:14px;font-weight:700;cursor:pointer;}
+.mockup-page .btn-complete:disabled{opacity:0.4;cursor:not-allowed;}
+
+/* Модалка направления */
+.mockup-modal-overlay{position:fixed;inset:0;background:rgba(31,58,82,0.18);display:flex;align-items:center;justify-content:center;z-index:40;padding:16px;}
+.mockup-modal{width:520px;max-width:100%;max-height:90vh;overflow-y:auto;background:var(--card);border-radius:18px;box-shadow:0 20px 60px rgba(31,58,82,0.18);}
+.mockup-modal .modal-head{padding:20px 24px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;}
+.mockup-modal .modal-head h3{font-size:17px;}
+.mockup-modal .close-x{width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;background:#F1EEE6;color:var(--ink-soft);cursor:pointer;border:none;}
+.mockup-modal .modal-body{padding:22px 24px;display:flex;flex-direction:column;gap:16px;}
+.mockup-modal .patient-strip{display:flex;align-items:center;gap:10px;background:var(--mint-l);border-radius:10px;padding:10px 14px;}
+.mockup-modal .field-label{font-size:11.5px;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;color:var(--ink-soft);margin-bottom:6px;}
+.mockup-modal .scope-toggle{display:flex;gap:8px;}
+.mockup-modal .scope-btn{flex:1;padding:9px;border-radius:9px;border:1px solid var(--line);background:#fff;text-align:center;font-size:12.5px;font-weight:600;cursor:pointer;}
+.mockup-modal .scope-btn.active{background:var(--navy);color:#fff;border-color:var(--navy);}
+.mockup-modal .select-field{width:100%;padding:11px 13px;border-radius:9px;border:1px solid var(--line);font-size:13px;color:var(--ink);background:#fff;font-family:inherit;}
+.mockup-modal .slots-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;}
+.mockup-modal .slot-btn{padding:10px 6px;border-radius:9px;border:1px solid var(--line);background:#fff;text-align:center;font-size:12px;font-family:'IBM Plex Mono',monospace;cursor:pointer;}
+.mockup-modal .slot-btn.selected{background:var(--mint);color:#fff;border-color:var(--mint);}
+.mockup-modal textarea{width:100%;padding:11px 13px;border-radius:9px;border:1px solid var(--line);font-size:13px;font-family:'Inter',sans-serif;resize:vertical;min-height:70px;}
+.mockup-modal .note-prefill{font-size:11px;color:var(--ink-soft);margin-top:5px;}
+.mockup-modal .priority-row{display:flex;gap:8px;}
+.mockup-modal .prio-chip{padding:7px 13px;border-radius:999px;font-size:12px;font-weight:600;border:1px solid var(--line);background:#fff;cursor:pointer;}
+.mockup-modal .prio-chip.active{background:var(--mint-l);border-color:var(--mint);color:var(--mint-d);}
+.mockup-modal .prio-chip.urgent.active{background:#FDF1E1;border-color:var(--amber);color:var(--amber);}
+.mockup-modal .prio-chip.emergency.active{background:var(--red-l);border-color:var(--red);color:var(--red);}
+
+/* Очередь триажа */
+.mockup-page .stats-row{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;}
+.mockup-page .stat{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px;}
+.mockup-page .stat-label{font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--ink-soft);}
+.mockup-page .stat-value{font-family:'IBM Plex Mono',monospace;font-size:24px;font-weight:600;color:var(--navy);margin-top:6px;}
+.mockup-page .section-label{font-size:11.5px;text-transform:uppercase;letter-spacing:0.06em;color:var(--ink-soft);margin-top:6px;}
+.mockup-page .queue{display:flex;flex-direction:column;gap:12px;}
+.mockup-page .suggestion{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 20px;display:grid;grid-template-columns:auto 1fr auto;gap:20px;align-items:start;}
+.mockup-page .suggestion.new{border-left:3px solid var(--mint);}
+.mockup-page .suggestion.uncertain{border-left:3px solid var(--amber);}
+.mockup-page .suggestion.history{opacity:0.6;align-items:center;}
+.mockup-page .patient-col{display:flex;flex-direction:column;gap:4px;min-width:150px;}
+.mockup-page .channel{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--ink-soft);}
+.mockup-page .channel-icon{width:16px;height:16px;border-radius:4px;background:#2AABEE;display:flex;align-items:center;justify-content:center;color:#fff;font-size:9px;font-weight:700;flex-shrink:0;}
+.mockup-page .patient-name{font-size:14.5px;font-weight:600;}
+.mockup-page .patient-time{font-size:11px;color:var(--ink-soft);}
+.mockup-page .middle-col{display:flex;flex-direction:column;gap:8px;}
+.mockup-page .complaint{font-size:13px;color:var(--ink);background:#FBFAF7;border:1px solid #F0EDE5;border-radius:10px;padding:9px 12px;font-style:italic;}
+.mockup-page .suggestion-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.mockup-page .tag{padding:4px 10px;border-radius:999px;font-size:11.5px;font-weight:600;}
+.mockup-page .tag.spec{background:var(--navy);color:#fff;}
+.mockup-page .tag.slot{background:var(--mint-l);color:var(--mint-d);}
+.mockup-page .tag.confidence{background:#EFECE3;color:var(--ink-soft);font-family:'IBM Plex Mono',monospace;font-weight:500;}
+.mockup-page .tag.confidence.low{background:var(--amber-l);color:var(--amber);}
+.mockup-page .actions-col{display:flex;flex-direction:column;gap:8px;min-width:150px;}
+.mockup-page .btn-confirm{background:var(--mint);color:#fff;}
+.mockup-page .btn-change{background:#fff;border:1px solid var(--line);color:var(--ink);}
+.mockup-page .btn-decline{background:#fff;border:1px solid var(--red);color:var(--red);}
+.mockup-page .status-pill{padding:3px 9px;border-radius:999px;font-size:11px;font-weight:600;white-space:nowrap;}
+.mockup-page .status-pill.confirmed{background:var(--mint-l);color:var(--mint-d);}
+.mockup-page .status-pill.declined{background:var(--red-l);color:var(--red);}
+.mockup-page .status-pill.expired{background:#EFECE3;color:var(--ink-soft);}
+.mockup-page .field-label{font-size:11.5px;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;color:var(--ink-soft);margin-bottom:6px;}
+.mockup-page .select-field{width:100%;padding:9px 12px;border-radius:9px;border:1px solid var(--line);font-size:12.5px;color:var(--ink);background:#fff;font-family:inherit;}
+.mockup-page .slots-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;}
+.mockup-page .slot-btn{padding:8px 4px;border-radius:8px;border:1px solid var(--line);background:#fff;text-align:center;font-size:11.5px;font-family:'IBM Plex Mono',monospace;cursor:pointer;}
+.mockup-page .slot-btn.selected{background:var(--mint);color:#fff;border-color:var(--mint);}
+
+/* Приём в стационар */
+.mockup-page .field{margin-bottom:14px;}
+.mockup-page .field:last-child{margin-bottom:0;}
+.mockup-page textarea{width:100%;padding:10px 13px;border-radius:9px;border:1px solid var(--line);font-size:13px;font-family:'Inter',sans-serif;color:var(--ink);resize:vertical;min-height:70px;}
+.mockup-page .bed-picker{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;}
+.mockup-page .bed-opt{padding:10px 6px;border-radius:9px;border:1px solid var(--line);text-align:center;font-size:11.5px;cursor:pointer;background:#fff;}
+.mockup-page .bed-opt.selected{background:var(--mint);color:#fff;border-color:var(--mint);}
+.mockup-page .bed-opt.taken{background:#F1EEE6;color:#B5AFA0;cursor:not-allowed;}
+.mockup-page .btn-submit{width:100%;padding:14px;border-radius:10px;background:var(--mint);color:#fff;border:none;font-size:14px;font-weight:700;cursor:pointer;}
+.mockup-page .btn-submit:disabled{opacity:0.4;cursor:not-allowed;}
+
+/* Коечный фонд */
+.mockup-page .bed-legend{display:flex;gap:18px;padding:12px 32px;background:var(--card);border-bottom:1px solid var(--line);font-size:12px;color:var(--ink-soft);flex-wrap:wrap;}
+.mockup-page .bed-legend span{display:flex;align-items:center;gap:6px;}
+.mockup-page .sw{width:14px;height:14px;border-radius:5px;display:inline-block;}
+.mockup-page .occ-bar{display:flex;align-items:center;gap:14px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 20px;}
+.mockup-page .occ-track{flex:1;height:14px;border-radius:999px;overflow:hidden;display:flex;background:var(--slate-l);}
+.mockup-page .occ-seg.occupied{background:var(--red);}
+.mockup-page .occ-seg.reserved{background:var(--amber);}
+.mockup-page .occ-seg.cleaning{background:var(--slate);}
+.mockup-page .occ-seg.free{background:var(--mint);}
+.mockup-page .occ-num{font-family:'IBM Plex Mono',monospace;font-size:13px;color:var(--navy);font-weight:600;white-space:nowrap;}
+.mockup-page .dept-block{background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden;}
+.mockup-page .dept-head{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--line);}
+.mockup-page .dept-head h3{font-size:15.5px;color:var(--navy);}
+.mockup-page .dept-head .cnt{font-size:12px;color:var(--ink-soft);}
+.mockup-page .rooms{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;padding:18px 20px;}
+.mockup-page .room{border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:8px;}
+.mockup-page .room-head{display:flex;align-items:center;justify-content:space-between;}
+.mockup-page .room-name{font-size:12.5px;font-weight:600;color:var(--ink-soft);}
+.mockup-page .room-cnt{font-size:10.5px;color:var(--ink-soft);}
+.mockup-page .beds{display:flex;gap:6px;flex-wrap:wrap;}
+.mockup-page .bed{width:34px;height:34px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;cursor:default;}
+.mockup-page .bed.free{background:var(--mint);}
+.mockup-page .bed.occupied{background:var(--red);}
+.mockup-page .bed.reserved{background:var(--amber);color:#3B2E14;}
+.mockup-page .bed.cleaning{background:var(--slate);}
+
+/* Лист наблюдения */
+.mockup-page .btn-add{padding:10px 16px;border-radius:9px;background:var(--mint);color:#fff;border:none;font-size:13px;font-weight:600;cursor:pointer;}
+.mockup-page .vitals-table{width:100%;border-collapse:collapse;}
+.mockup-page .vitals-table th{background:#FBFAF7;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:0.04em;color:var(--ink-soft);padding:11px 12px;border-bottom:1px solid var(--line);}
+.mockup-page .vitals-table td{padding:12px;border-bottom:1px solid #F1EEE6;font-size:13px;}
+.mockup-page .vitals-table tr:last-child td{border-bottom:none;}
+.mockup-page .vitals-table .val{font-family:'IBM Plex Mono',monospace;font-weight:600;}
+.mockup-page .vitals-table .val.warn{color:var(--red);}
+.mockup-page .vitals-table .by{font-size:11px;color:var(--ink-soft);}
+
+/* Расписание по сети */
+.mockup-page .spacer{flex:1;}
+.mockup-page .date-nav{display:flex;align-items:center;gap:12px;font-family:'IBM Plex Mono',monospace;font-size:13px;}
+.mockup-page .date-nav button{width:26px;height:26px;border-radius:7px;border:1px solid var(--line);background:#fff;cursor:pointer;}
+.mockup-page .today-btn{padding:6px 12px;border-radius:8px;background:var(--mint-l);color:var(--mint-d);font-weight:600;font-size:12px;border:none;cursor:pointer;}
+.mockup-page .sched-legend{display:flex;gap:16px;padding:10px 32px;font-size:12px;color:var(--ink-soft);background:var(--card);border-bottom:1px solid var(--line);flex-wrap:wrap;}
+.mockup-page .sched-legend span{display:flex;align-items:center;gap:6px;}
+.mockup-page .board{padding:22px 32px;}
+.mockup-page .branch-block{margin-bottom:26px;}
+.mockup-page .branch-head{display:flex;align-items:center;gap:10px;margin-bottom:10px;}
+.mockup-page .branch-head h3{font-size:15px;color:var(--navy);}
+.mockup-page .branch-head .cnt{font-size:11.5px;color:var(--ink-soft);background:#EFECE3;padding:2px 8px;border-radius:999px;}
+.mockup-page .grid{display:grid;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--card);}
+.mockup-page .grid > div{border-right:1px solid #F0EDE5;border-bottom:1px solid #F0EDE5;padding:8px 6px;min-height:52px;position:relative;}
+.mockup-page .grid > div:last-child{border-right:none;}
+.mockup-page .hcell{background:#FBFAF7;font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--ink-soft);text-align:center;padding:8px 4px !important;min-height:auto !important;}
+.mockup-page .doc-name{display:flex;align-items:center;gap:8px;background:#FBFAF7;min-height:auto !important;}
+.mockup-page .doc-avatar{width:24px;height:24px;border-radius:50%;background:var(--navy);color:#fff;font-family:'Fraunces',serif;font-size:9.5px;font-weight:600;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.mockup-page .doc-meta{line-height:1.25;}
+.mockup-page .doc-meta .n{font-size:12px;font-weight:600;}
+.mockup-page .doc-meta .s{font-size:10px;color:var(--ink-soft);}
+.mockup-page .slot{border-radius:7px;padding:4px 6px;font-size:10.5px;font-weight:600;line-height:1.25;margin-bottom:4px;}
+.mockup-page .slot:last-child{margin-bottom:0;}
+.mockup-page .slot .t{font-family:'IBM Plex Mono',monospace;font-size:9.5px;font-weight:500;opacity:0.75;}
+.mockup-page .slot.mint{background:var(--mint-l);color:var(--mint-d);}
+.mockup-page .slot.amber{background:var(--amber-l);color:var(--amber);}
+.mockup-page .slot.red{background:var(--red-l);color:var(--red);}
+.mockup-page .empty-cell{background:repeating-linear-gradient(135deg,#fff,#fff 6px,#FAF9F6 6px,#FAF9F6 12px);}
+
+/* Дашборд сети */
+.mockup-page .kpi-row{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;}
+.mockup-page .kpi-card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 20px;display:flex;flex-direction:column;gap:8px;min-height:76px;}
+.mockup-page .kpi-label{font-size:11.5px;text-transform:uppercase;letter-spacing:0.06em;color:var(--ink-soft);}
+.mockup-page .kpi-value{font-family:'IBM Plex Mono',monospace;font-size:26px;font-weight:600;color:var(--navy);}
+.mockup-page .kpi-delta{font-size:12px;font-weight:600;}
+.mockup-page .kpi-delta.up{color:var(--mint-d);}
+.mockup-page .kpi-delta.down{color:var(--red);}
+.mockup-page .grid-2{display:grid;grid-template-columns:1.5fr 1fr;gap:20px;align-items:start;}
+.mockup-page .panel-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;}
+.mockup-page .panel-head h3{font-size:16px;}
+.mockup-page .panel-head .link{font-size:12px;color:var(--mint-d);font-weight:600;cursor:pointer;}
+.mockup-page .branch-row{display:flex;align-items:center;gap:14px;padding:11px 0;border-bottom:1px solid #F1EEE6;}
+.mockup-page .branch-row:last-child{border-bottom:none;}
+.mockup-page .branch-name{width:130px;flex-shrink:0;font-size:13px;font-weight:500;}
+.mockup-page .branch-bar-track{flex:1;height:8px;background:#F1EEE6;border-radius:999px;overflow:hidden;}
+.mockup-page .branch-bar-fill{height:100%;border-radius:999px;background:var(--mint);}
+.mockup-page .branch-val{width:100px;flex-shrink:0;text-align:right;font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:var(--ink-soft);}
+.mockup-page .alert{display:flex;gap:10px;padding:11px 0;border-bottom:1px solid #F1EEE6;align-items:flex-start;}
+.mockup-page .alert:last-child{border-bottom:none;}
+.mockup-page .alert-badge{width:7px;height:7px;border-radius:50%;margin-top:5px;flex-shrink:0;}
+.mockup-page .alert-badge.crit{background:var(--red);}
+.mockup-page .alert-badge.warn{background:var(--amber);}
+.mockup-page .alert-title{font-size:13px;font-weight:500;}
+.mockup-page .alert-sub{font-size:11.5px;color:var(--ink-soft);margin-top:1px;}
+.mockup-page .pill.wait{background:#FDF1E1;color:var(--amber);}
+.mockup-page .doc-cell{display:flex;align-items:center;gap:8px;}
+.mockup-page table{width:100%;border-collapse:collapse;}
+.mockup-page table th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:var(--ink-soft);font-weight:600;padding:0 10px 10px;border-bottom:1px solid var(--line);}
+.mockup-page table td{padding:12px 10px;border-bottom:1px solid #F1EEE6;font-size:13px;}
+.mockup-page table tr:last-child td{border-bottom:none;}
+
+/* Аналитика сети */
+.mockup-page .funnel-row{display:flex;align-items:center;gap:14px;margin-bottom:10px;}
+.mockup-page .funnel-row:last-child{margin-bottom:0;}
+.mockup-page .funnel-bar{height:34px;border-radius:8px;background:var(--mint);display:flex;align-items:center;padding:0 14px;color:#fff;font-size:12.5px;font-weight:600;white-space:nowrap;}
+.mockup-page .funnel-label{width:160px;flex-shrink:0;font-size:12.5px;color:var(--ink-soft);}
+.mockup-page .funnel-num{margin-left:auto;font-family:'IBM Plex Mono',monospace;}
+.mockup-page .trend-row{display:flex;align-items:flex-end;gap:8px;height:120px;margin-top:24px;}
+.mockup-page .trend-bar{flex:1;background:var(--mint-l);border-radius:6px 6px 0 0;position:relative;}
+.mockup-page .trend-bar .cap{position:absolute;top:-18px;left:0;right:0;text-align:center;font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--ink-soft);}
+.mockup-page .trend-lbl{display:flex;gap:8px;margin-top:6px;}
+.mockup-page .trend-lbl span{flex:1;text-align:center;font-size:10px;color:var(--ink-soft);}
+.mockup-page .cohort-row{display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid #F1EEE6;font-size:13px;}
+.mockup-page .cohort-row:last-child{border-bottom:none;}
+.mockup-modal .modal-foot{padding:18px 24px;border-top:1px solid var(--line);display:flex;gap:10px;justify-content:flex-end;}

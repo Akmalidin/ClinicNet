@@ -16,3 +16,8 @@ media/
 htmlcov/
 .idea/
 .vscode/
+
+# Docker-стек (docker-compose.yml) — сертификаты и ACME-челлендж-файлы,
+# генерируются на сервере init-letsencrypt.sh/certbot, секреты внутри.
+deploy/docker/certbot/conf/
+deploy/docker/certbot/www/

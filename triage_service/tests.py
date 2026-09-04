@@ -28,18 +28,26 @@ class KeywordSpecialtyClassifierTests(unittest.TestCase):
         self.classifier = KeywordSpecialtyClassifier()
 
     def test_matches_a_known_symptom(self):
-        self.assertEqual(self.classifier.classify("Болит зуб, кариес наверное", SPECIALTIES), "therapy")
+        code, confidence = self.classifier.classify("Болит зуб, кариес наверное", SPECIALTIES)
+        self.assertEqual(code, "therapy")
+        self.assertEqual(confidence, 80)  # 2 keyword hits: "болит зуб", "кариес"
 
     def test_matches_orthodontics(self):
-        self.assertEqual(self.classifier.classify("Хочу поставить брекеты", SPECIALTIES), "ortho")
+        code, confidence = self.classifier.classify("Хочу поставить брекеты", SPECIALTIES)
+        self.assertEqual(code, "ortho")
+        self.assertEqual(confidence, 65)  # 1 keyword hit: "брекет"
 
     def test_no_match_returns_none(self):
-        self.assertIsNone(self.classifier.classify("Просто хотел спросить про часы работы", SPECIALTIES))
+        code, confidence = self.classifier.classify("Просто хотел спросить про часы работы", SPECIALTIES)
+        self.assertIsNone(code)
+        self.assertIsNone(confidence)
 
     def test_never_returns_a_specialty_the_clinic_does_not_have(self):
         # "удаление" keyword maps to "surgery" in KEYWORD_MAP, but this
         # network's catalog only has therapy/ortho — must not hallucinate it.
-        self.assertIsNone(self.classifier.classify("Нужно удалить зуб мудрости", SPECIALTIES))
+        code, confidence = self.classifier.classify("Нужно удалить зуб мудрости", SPECIALTIES)
+        self.assertIsNone(code)
+        self.assertIsNone(confidence)
 
 
 class FindNearestSlotSkipsPastTests(unittest.IsolatedAsyncioTestCase):

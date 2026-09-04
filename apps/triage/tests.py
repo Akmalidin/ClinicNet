@@ -75,6 +75,36 @@ class TriageSuggestionModelTests(TenantTestCase):
         with self.assertRaises(ValidationError):
             suggestion.confirm(confirmed_by=self.coordinator, patient=self.patient)
 
+    def test_confirm_with_slot_override_books_the_alternate_slot(self):
+        """"Изменить слот" — координатор подтверждает на другого врача/
+        время, а не на то, что предложил бот."""
+        suggestion = self._suggestion()
+        other_doctor = User.objects.create(username="doc2")
+        new_start, new_end = _future(72), _future(73)
+        self.assertTrue(suggestion.confirm(
+            confirmed_by=self.coordinator, patient=self.patient,
+            doctor=other_doctor, starts_at=new_start, ends_at=new_end,
+        ))
+        appt = suggestion.resulting_appointment
+        self.assertEqual(appt.doctor, other_doctor)
+        self.assertEqual(appt.starts_at, new_start)
+        # Original bot suggestion is left untouched — it's a historical
+        # record of what the bot actually proposed, not overwritten.
+        self.assertEqual(suggestion.suggested_doctor, self.doctor)
+
+    def test_confirm_override_in_the_past_is_rejected_without_expiring(self):
+        """Unlike the bot's own stale slot (which auto-EXPIREs), a
+        coordinator picking a past time by mistake just fails — the
+        suggestion itself isn't the thing that's wrong here."""
+        suggestion = self._suggestion()
+        other_doctor = User.objects.create(username="doc2")
+        self.assertFalse(suggestion.confirm(
+            confirmed_by=self.coordinator, patient=self.patient,
+            doctor=other_doctor, starts_at=_future(-1), ends_at=_future(0),
+        ))
+        suggestion.refresh_from_db()
+        self.assertEqual(suggestion.status, TriageSuggestionStatus.PENDING)
+
     def test_cannot_reopen_confirmed_suggestion(self):
         suggestion = self._suggestion()
         suggestion.confirm(confirmed_by=self.coordinator, patient=self.patient)
@@ -199,6 +229,54 @@ class TriageSuggestionAPIRBACTests(TenantTestCase):
         suggestion_id = create.data["id"]
         client = self._client_for(self.coordinator_a)
         response = client.post(f"/api/v1/triage-suggestions/{suggestion_id}/confirm/", {}, HTTP_HOST=self.host)
+        self.assertEqual(response.status_code, 400)
+
+    def test_coordinator_confirms_with_slot_override(self):
+        """"Изменить слот" через реальный HTTP-запрос — координатор
+        подтверждает на другого врача/время того же филиала."""
+        bot_client = self._client_for(self.bot)
+        create = bot_client.post(
+            "/api/v1/triage-suggestions/", self._ingest_payload(self.branch_a), HTTP_HOST=self.host,
+        )
+        suggestion_id = create.data["id"]
+        new_start, new_end = _future(72), _future(73)
+
+        client = self._client_for(self.coordinator_a)
+        response = client.post(
+            f"/api/v1/triage-suggestions/{suggestion_id}/confirm/",
+            {
+                "patient": self.patient.pk,
+                "doctor": self.doc_user.pk,
+                "starts_at": new_start.isoformat(),
+                "ends_at": new_end.isoformat(),
+            },
+            HTTP_HOST=self.host,
+        )
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["status"], TriageSuggestionStatus.CONFIRMED)
+        appointment_id = response.data["resulting_appointment"]
+        self.assertIsNotNone(appointment_id)
+        appointment = Appointment.objects.get(pk=appointment_id)
+        self.assertEqual(appointment.doctor_id, self.doc_user.pk)
+        self.assertEqual(appointment.starts_at, new_start)
+        # Original bot suggestion fields stay as the bot proposed them.
+        suggestion = TriageSuggestion.objects.get(pk=suggestion_id)
+        self.assertEqual(suggestion.suggested_doctor_id, self.doctor.pk)
+
+    def test_confirm_with_partial_override_is_rejected(self):
+        """doctor/starts_at/ends_at — либо все три, либо ни одного."""
+        bot_client = self._client_for(self.bot)
+        create = bot_client.post(
+            "/api/v1/triage-suggestions/", self._ingest_payload(self.branch_a), HTTP_HOST=self.host,
+        )
+        suggestion_id = create.data["id"]
+
+        client = self._client_for(self.coordinator_a)
+        response = client.post(
+            f"/api/v1/triage-suggestions/{suggestion_id}/confirm/",
+            {"patient": self.patient.pk, "doctor": self.doc_user.pk},
+            HTTP_HOST=self.host,
+        )
         self.assertEqual(response.status_code, 400)
 
     def test_coordinator_rejects_a_suggestion(self):

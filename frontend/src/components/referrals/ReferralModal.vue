@@ -1,7 +1,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 
-import { branchesApi, doctorsApi, referralsApi, specialtiesApi } from '../../api'
+import { appointmentsApi, branchesApi, doctorsApi, referralsApi, specialtiesApi } from '../../api'
 import { useAuthStore } from '../../stores/auth'
 
 // Two scenarios (ClinicNet-Referrals-Prompt.md section 6/7, steps 5-6):
@@ -36,6 +36,13 @@ const selectedDoctorId = ref(null) // required in same_branch, optional in cross
 
 const slotsByDate = ref({}) // { 'YYYY-MM-DD': [slot, ...] }
 const slotsLoading = ref(false)
+// Picking a slot here is optional — the mockup's primary flow ("Направить
+// на 15:00") books it immediately, same two-call sequence
+// ReferralQueueWidget.vue's bookSlot() already uses (create Appointment,
+// then referrals/{id}/schedule/ to link it) — reused here rather than
+// reinvented. Leaving no slot selected keeps the older "pending, book
+// later" flow working exactly as before.
+const selectedSlot = ref(null)
 
 const reason = ref('')
 const clinicalNote = ref('')
@@ -67,6 +74,7 @@ function reset() {
   selectedDoctorId.value = null
   doctors.value = []
   slotsByDate.value = {}
+  selectedSlot.value = null
   reason.value = props.visit?.reason ?? ''
   clinicalNote.value = props.visit?.clinical_note ?? ''
   priority.value = 'routine'
@@ -141,6 +149,7 @@ watch([selectedSpecialtyId, selectedBranchId], async ([specialtyId, branchId]) =
 
 watch(selectedDoctorId, async (doctorId) => {
   slotsByDate.value = {}
+  selectedSlot.value = null
   if (!doctorId) return
   slotsLoading.value = true
   try {
@@ -169,17 +178,22 @@ function formatTime(iso) {
   return new Date(iso).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
 }
 
+function selectSlot(slot) {
+  selectedSlot.value = selectedSlot.value?.starts_at === slot.starts_at ? null : slot
+}
+
 async function submit() {
   submitError.value = ''
   submitting.value = true
   try {
     const crossBranch = mode.value === 'cross_branch'
+    const toBranch = crossBranch ? selectedBranchId.value : props.visit.branch
     const { data } = await referralsApi.create({
       patient: props.patient.id,
       to_doctor: selectedDoctorId.value || null,
       to_specialty: crossBranch && !selectedDoctorId.value ? selectedSpecialtyId.value : null,
       from_branch: props.visit.branch,
-      to_branch: crossBranch ? selectedBranchId.value : props.visit.branch,
+      to_branch: toBranch,
       source_visit: props.visit.id,
       reason: reason.value.trim(),
       clinical_note: clinicalNote.value,
@@ -188,7 +202,24 @@ async function submit() {
       // it from source_visit itself (apps/referrals/views.py perform_create),
       // read-only on the serializer, so it can't be forged from here either.
     })
-    emit('created', data)
+
+    let result = data
+    if (selectedSlot.value && selectedDoctorId.value) {
+      // Book it immediately, same sequence ReferralQueueWidget.vue's
+      // bookSlot() uses — Appointment.clean()'s own overlap-check still
+      // re-validates the slot wasn't taken in the meantime.
+      const { data: appointment } = await appointmentsApi.create({
+        branch: toBranch,
+        patient: props.patient.id,
+        doctor: selectedDoctorId.value,
+        starts_at: selectedSlot.value.starts_at,
+        ends_at: selectedSlot.value.ends_at,
+      })
+      const { data: scheduled } = await referralsApi.schedule(data.id, appointment.id)
+      result = scheduled
+    }
+
+    emit('created', result)
     emit('close')
   } catch (e) {
     const data = e.response?.data
@@ -199,153 +230,148 @@ async function submit() {
     submitting.value = false
   }
 }
+
+const submitLabel = computed(() => {
+  if (submitting.value) return 'Создаём…'
+  if (selectedSlot.value) return `Направить на ${formatTime(selectedSlot.value.starts_at)}`
+  return 'Создать направление'
+})
 </script>
 
 <template>
-  <div
-    v-if="open"
-    class="fixed inset-0 bg-black/30 flex items-center justify-center z-40 p-4"
-    @click.self="emit('close')"
-  >
-    <div class="card w-full max-w-lg max-h-[90vh] overflow-y-auto p-6 space-y-4">
-      <header class="flex items-center justify-between">
-        <h2 class="text-lg font-semibold text-gray-900">
-          Направить · {{ patient.first_name }} {{ patient.last_name }}
-        </h2>
-        <button class="text-gray-400 hover:text-gray-600" @click="emit('close')">✕</button>
-      </header>
-
-      <div class="flex rounded-lg border border-gray-200 p-1 text-sm">
-        <button
-          class="flex-1 rounded-md py-1.5 font-medium transition-colors"
-          :class="mode === 'same_branch' ? 'bg-primary text-white' : 'text-gray-600 hover:bg-gray-50'"
-          @click="mode = 'same_branch'"
-        >
-          Внутри филиала
-        </button>
-        <button
-          class="flex-1 rounded-md py-1.5 font-medium transition-colors"
-          :class="mode === 'cross_branch' ? 'bg-primary text-white' : 'text-gray-600 hover:bg-gray-50'"
-          @click="mode = 'cross_branch'"
-        >
-          В другой филиал
-        </button>
+  <div v-if="open" class="mockup-page mockup-modal-overlay" @click.self="emit('close')">
+    <div class="mockup-modal">
+      <div class="modal-head">
+        <h3>Направить пациента</h3>
+        <button class="close-x" @click="emit('close')">✕</button>
       </div>
 
-      <p v-if="pickersError" class="text-sm text-red-600">{{ pickersError }}</p>
-
-      <template v-if="mode === 'same_branch'">
-        <p class="text-sm text-gray-500">Внутри филиала «{{ visit.branch_name }}».</p>
+      <div class="modal-body">
+        <div class="patient-strip">
+          <div class="avatar">{{ (patient.first_name?.[0] ?? '') + (patient.last_name?.[0] ?? '') }}</div>
+          <div style="font-size:13px;font-weight:600;color:var(--mint-d)">{{ patient.first_name }} {{ patient.last_name }}</div>
+        </div>
 
         <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">Врач</label>
-          <p v-if="doctorsError" class="text-sm text-red-600">{{ doctorsError }}</p>
-          <select v-else v-model="selectedDoctorId" class="form-input">
-            <option :value="null" disabled>Выберите врача…</option>
-            <option v-for="doctor in doctors" :key="doctor.id" :value="doctor.id">
-              {{ doctor.display_name }}
-              <template v-if="doctor.specialties.length">
-                ({{ doctor.specialties.map((s) => s.name).join(', ') }})
-              </template>
-            </option>
-          </select>
-          <p v-if="doctors.length === 0 && !doctorsError && !doctorsLoading" class="text-xs text-gray-400 mt-1">
-            В этом филиале нет других врачей для направления.
-          </p>
-        </div>
-      </template>
-
-      <template v-else>
-        <p class="text-sm text-gray-500">
-          Из «{{ visit.branch_name }}» в другой филиал сети — сначала специальность, затем филиал и,
-          при желании, конкретный врач.
-        </p>
-
-        <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">Специальность</label>
-          <select v-model="selectedSpecialtyId" class="form-input">
-            <option :value="null" disabled>Выберите специальность…</option>
-            <option v-for="specialty in specialties" :key="specialty.id" :value="specialty.id">
-              {{ specialty.name }}
-            </option>
-          </select>
-        </div>
-
-        <div v-if="selectedSpecialtyId">
-          <label class="block text-sm font-medium text-gray-700 mb-1">Филиал</label>
-          <select v-model="selectedBranchId" class="form-input">
-            <option :value="null" disabled>Выберите филиал…</option>
-            <option v-for="branch in crossBranchOptions" :key="branch.id" :value="branch.id">
-              {{ branch.name }}
-            </option>
-          </select>
-        </div>
-
-        <div v-if="selectedSpecialtyId && selectedBranchId">
-          <label class="block text-sm font-medium text-gray-700 mb-1">
-            Врач <span class="text-gray-400 font-normal">(необязательно)</span>
-          </label>
-          <p v-if="doctorsError" class="text-sm text-red-600">{{ doctorsError }}</p>
-          <select v-else v-model="selectedDoctorId" class="form-input">
-            <option :value="null">На специальность — без конкретного врача</option>
-            <option v-for="doctor in doctors" :key="doctor.id" :value="doctor.id">
-              {{ doctor.display_name }}
-            </option>
-          </select>
-          <p v-if="doctors.length === 0 && !doctorsError && !doctorsLoading" class="text-xs text-gray-400 mt-1">
-            В этом филиале нет врачей с этой специальностью — направление всё равно можно создать
-            «на специальность», его разберёт координатор филиала.
-          </p>
-        </div>
-      </template>
-
-      <div v-if="selectedDoctorId">
-        <p class="text-sm font-medium text-gray-700 mb-1">
-          Свободные окна {{ selectedDoctor?.display_name }} на ближайшие 3 дня
-        </p>
-        <p v-if="slotsLoading" class="text-sm text-gray-400">Загружаем слоты…</p>
-        <p v-else-if="!hasAnySlot" class="text-sm text-gray-400">
-          Свободных окон не найдено — направление всё равно можно создать, слот подтвердит
-          принимающий врач или координатор.
-        </p>
-        <div v-else class="space-y-2">
-          <div v-for="date in dates" :key="date">
-            <p v-if="slotsByDate[date]?.length" class="text-xs text-gray-500 mb-1">{{ date }}</p>
-            <div class="flex flex-wrap gap-1">
-              <span v-for="slot in slotsByDate[date] ?? []" :key="slot.starts_at" class="badge-gray">
-                {{ formatTime(slot.starts_at) }}–{{ formatTime(slot.ends_at) }}
-              </span>
+          <div class="field-label">Куда направляем</div>
+          <div class="scope-toggle">
+            <div class="scope-btn" :class="{ active: mode === 'same_branch' }" @click="mode = 'same_branch'">
+              Этот филиал
+            </div>
+            <div class="scope-btn" :class="{ active: mode === 'cross_branch' }" @click="mode = 'cross_branch'">
+              Другой филиал сети
             </div>
           </div>
         </div>
+
+        <p v-if="pickersError" style="font-size:13px;color:var(--red)">{{ pickersError }}</p>
+
+        <template v-if="mode === 'same_branch'">
+          <div>
+            <div class="field-label">Врач — «{{ visit.branch_name }}»</div>
+            <p v-if="doctorsError" style="font-size:13px;color:var(--red)">{{ doctorsError }}</p>
+            <select v-else v-model="selectedDoctorId" class="select-field">
+              <option :value="null" disabled>Выберите врача…</option>
+              <option v-for="doctor in doctors" :key="doctor.id" :value="doctor.id">
+                {{ doctor.display_name }}
+                <template v-if="doctor.specialties.length">
+                  ({{ doctor.specialties.map((s) => s.name).join(', ') }})
+                </template>
+              </option>
+            </select>
+            <p v-if="doctors.length === 0 && !doctorsError && !doctorsLoading" style="font-size:11px;color:var(--ink-soft);margin-top:4px">
+              В этом филиале нет других врачей для направления.
+            </p>
+          </div>
+        </template>
+
+        <template v-else>
+          <div>
+            <div class="field-label">Специальность</div>
+            <select v-model="selectedSpecialtyId" class="select-field">
+              <option :value="null" disabled>Выберите специальность…</option>
+              <option v-for="specialty in specialties" :key="specialty.id" :value="specialty.id">
+                {{ specialty.name }}
+              </option>
+            </select>
+          </div>
+
+          <div v-if="selectedSpecialtyId">
+            <div class="field-label">Филиал</div>
+            <select v-model="selectedBranchId" class="select-field">
+              <option :value="null" disabled>Выберите филиал…</option>
+              <option v-for="branch in crossBranchOptions" :key="branch.id" :value="branch.id">
+                {{ branch.name }}
+              </option>
+            </select>
+          </div>
+
+          <div v-if="selectedSpecialtyId && selectedBranchId">
+            <div class="field-label">Врач (необязательно)</div>
+            <p v-if="doctorsError" style="font-size:13px;color:var(--red)">{{ doctorsError }}</p>
+            <select v-else v-model="selectedDoctorId" class="select-field">
+              <option :value="null">На специальность — без конкретного врача</option>
+              <option v-for="doctor in doctors" :key="doctor.id" :value="doctor.id">
+                {{ doctor.display_name }}
+              </option>
+            </select>
+            <p v-if="doctors.length === 0 && !doctorsError && !doctorsLoading" style="font-size:11px;color:var(--ink-soft);margin-top:4px">
+              В этом филиале нет врачей с этой специальностью — направление всё равно можно создать
+              «на специальность», его разберёт координатор филиала.
+            </p>
+          </div>
+        </template>
+
+        <div v-if="selectedDoctorId">
+          <div class="field-label">Свободные слоты — {{ selectedDoctor?.display_name }}</div>
+          <p v-if="slotsLoading" style="font-size:12.5px;color:var(--ink-soft)">Загружаем слоты…</p>
+          <p v-else-if="!hasAnySlot" style="font-size:12.5px;color:var(--ink-soft)">
+            Свободных окон не найдено — направление всё равно можно создать, слот подтвердит
+            принимающий врач или координатор.
+          </p>
+          <template v-else>
+            <div v-for="date in dates" :key="date" style="margin-bottom:6px">
+              <p v-if="slotsByDate[date]?.length" style="font-size:11px;color:var(--ink-soft);margin-bottom:4px">{{ date }}</p>
+              <div class="slots-grid">
+                <div
+                  v-for="slot in slotsByDate[date] ?? []"
+                  :key="slot.starts_at"
+                  class="slot-btn"
+                  :class="{ selected: selectedSlot?.starts_at === slot.starts_at }"
+                  @click="selectSlot(slot)"
+                >
+                  {{ formatTime(slot.starts_at) }}
+                </div>
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <div>
+          <div class="field-label">Причина направления</div>
+          <textarea v-model="reason" required maxlength="255"></textarea>
+        </div>
+
+        <div>
+          <div class="field-label">Клиническая заметка</div>
+          <textarea v-model="clinicalNote"></textarea>
+        </div>
+
+        <div>
+          <div class="field-label">Приоритет</div>
+          <div class="priority-row">
+            <div class="prio-chip" :class="{ active: priority === 'routine' }" @click="priority = 'routine'">Плановое</div>
+            <div class="prio-chip urgent" :class="{ active: priority === 'urgent' }" @click="priority = 'urgent'">Срочное</div>
+            <div class="prio-chip emergency" :class="{ active: priority === 'emergency' }" @click="priority = 'emergency'">Экстренное</div>
+          </div>
+        </div>
+
+        <p v-if="submitError" style="font-size:13px;color:var(--red)">{{ submitError }}</p>
       </div>
 
-      <div>
-        <label class="block text-sm font-medium text-gray-700 mb-1">Причина направления</label>
-        <input v-model="reason" class="form-input" required maxlength="255" />
-      </div>
-
-      <div>
-        <label class="block text-sm font-medium text-gray-700 mb-1">Клиническая заметка</label>
-        <textarea v-model="clinicalNote" class="form-input" rows="3" />
-      </div>
-
-      <div>
-        <label class="block text-sm font-medium text-gray-700 mb-1">Приоритет</label>
-        <select v-model="priority" class="form-input">
-          <option value="routine">Плановое</option>
-          <option value="urgent">Срочное</option>
-          <option value="emergency">Экстренное</option>
-        </select>
-      </div>
-
-      <p v-if="submitError" class="text-sm text-red-600">{{ submitError }}</p>
-
-      <div class="flex justify-end gap-2 pt-2">
-        <button class="btn-secondary" :disabled="submitting" @click="emit('close')">Отмена</button>
-        <button class="btn-primary" :disabled="!canSubmit" @click="submit">
-          {{ submitting ? 'Создаём…' : 'Создать направление' }}
-        </button>
+      <div class="modal-foot">
+        <button class="btn btn-ghost" :disabled="submitting" @click="emit('close')">Отмена</button>
+        <button class="btn btn-mint" :disabled="!canSubmit" @click="submit">{{ submitLabel }}</button>
       </div>
     </div>
   </div>

@@ -1,4 +1,9 @@
-# Деплой ClinicNet — `clinicnet.stom.asia`
+# Деплой ClinicNet — `clinicnet.stom.asia` (АРХИВ — старый сервер)
+
+> **Устарело.** Проект переехал на новый, выделенный только под
+> ClinicNet сервер, деплой там — через Docker, см. `docs/DEPLOY-DOCKER.md`.
+> Этот файл оставлен как есть — история и справка по общему хосту
+> `46.149.68.65`, если он ещё где-то используется.
 
 Сервер `46.149.68.65` — **общий продовый хост**, на нём уже живут SADAF
 (`sadaf.service`, `/var/www/sadaf`), AutoParts ERP (`erp_gunicorn.service`) и
@@ -33,14 +38,80 @@ sudo -u postgres psql -c "CREATE DATABASE clinicnet OWNER clinicnet;"
 
 ## 3. Приложение
 
+Репозиторий приватный — обычный `git clone`/`git pull` по HTTPS без
+креда падает 401 (GitHub с 2021 года не принимает пароль аккаунта для
+git, только токен/ключ). Вместо токена в URL — **Deploy Key** (SSH,
+read-only, привязанный к этому конкретному репозиторию, не к аккаунту
+целиком): ключ живёт только на сервере, приватная часть никуда не
+уходит.
+
+`www-data`'s `$HOME` — это `/var/www` (дефолт Debian), который сам
+`www-data` не может писать (см. ниже про npm-кэш — та же причина), так
+что ключ и known_hosts кладём не в дефолтное `~/.ssh`, а внутрь
+`/var/www/clinicnet` (её ниже создаём и чауним первой), и указываем
+git путь к нему явно (`core.sshCommand`), а не полагаемся на дефолтный
+`~/.ssh/config`.
+
 ```bash
 mkdir -p /var/www/clinicnet
 chown www-data:www-data /var/www/clinicnet
+
+sudo -u www-data mkdir -p /var/www/clinicnet/.ssh
+sudo -u www-data ssh-keygen -t ed25519 -f /var/www/clinicnet/.ssh/github_deploy_key -N "" -C "clinicnet-prod-deploy"
+sudo -u www-data ssh-keyscan -t ed25519 github.com >> /var/www/clinicnet/.ssh/known_hosts
+chmod 600 /var/www/clinicnet/.ssh/github_deploy_key
+cat /var/www/clinicnet/.ssh/github_deploy_key.pub
+```
+
+Вставить вывод последней команды: репозиторий `Akmalidin/ClinicNet` →
+Settings → Deploy keys → Add deploy key (например, title
+`clinicnet-prod-server`). **"Allow write access" оставить
+выключенным** — серверу нужно только `git pull`, не push.
+
+```bash
 cd /var/www/clinicnet
-sudo -u www-data git clone https://github.com/Akmalidin/ClinicNet.git .
-sudo -u www-data git checkout claude/phase2-emk-referrals-models   # до мержа PR в main
+GIT_SSH_COMMAND="ssh -i /var/www/clinicnet/.ssh/github_deploy_key -o UserKnownHostsFile=/var/www/clinicnet/.ssh/known_hosts -o IdentitiesOnly=yes"
+sudo -u www-data env GIT_SSH_COMMAND="$GIT_SSH_COMMAND" git clone git@github.com:Akmalidin/ClinicNet.git .
+sudo -u www-data git config core.sshCommand "$GIT_SSH_COMMAND"   # чтобы дальнейшие pull/fetch не требовали переменную заново
+sudo -u www-data git checkout claude/odontis-enterprise-phased-plan-tal1n4   # до мержа PR #19 в main
 sudo -u www-data python3 -m venv venv
 sudo -u www-data venv/bin/pip install -r requirements.txt
+```
+
+Фронтенд (Vue) собирается отдельно от Django — сам бэкенд его не отдаёт
+вообще (никакого catch-all/`TemplateView` в `config/urls.py`), это
+целиком забота nginx (см. `deploy/nginx/clinicnet-stom-asia`: `/api/` и
+`/admin/` идут в gunicorn, всё остальное — собранный SPA с фолбэком на
+`index.html`). Сборка кладётся в `/var/www/clinicnet/frontend-dist/` —
+путь, который тот vhost и ожидает. Требует Node.js — на сервере до этого
+ставился только Python-стек (SADAF/ERP/CRM — все на gunicorn), так что
+`npm` может не быть вообще; проверить `node -v` и при отсутствии
+поставить один раз на весь сервер (Node 20 LTS, systemwide — как и
+Python-стек, не per-app):
+
+```bash
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get install -y nodejs
+node -v && npm -v   # v20.x / 10.x
+```
+
+`www-data`'s home directory resolves to `/var/www` (Debian default), so
+`sudo -u www-data npm ci` puts its cache at `/var/www/.npm` — but only
+`/var/www/clinicnet` was chowned to `www-data` above, not `/var/www`
+itself, so `www-data` can't create that directory on its own. Create it
+once, as root, before the first build ever run on this server:
+
+```bash
+sudo mkdir -p /var/www/.npm
+sudo chown -R 33:33 /var/www/.npm   # 33 = www-data's uid/gid on Debian/Ubuntu
+```
+
+```bash
+cd /var/www/clinicnet/frontend
+sudo -u www-data npm ci
+sudo -u www-data npm run build
+sudo -u www-data rm -rf /var/www/clinicnet/frontend-dist
+sudo -u www-data cp -r dist /var/www/clinicnet/frontend-dist
 ```
 
 `.env` (владелец `www-data`, права `600` — секреты):
@@ -95,8 +166,14 @@ systemctl reload nginx   # reload, не restart — не рвёт соедине
 приоритетнее `*.stom.asia` (wildcard) в `sites-available/stom-asia` — запрос
 уйдёт в ClinicNet, SADAF не заденет.
 
+nginx (обычно `www-data` в его собственном воркер-процессе) должен иметь
+право на чтение `/var/www/clinicnet/frontend-dist/` — если каталог
+создавался под `www-data:www-data` (как и остальной `/var/www/clinicnet`
+в шаге 3), отдельно ничего настраивать не нужно.
+
 Проверить: `curl -I https://clinicnet.stom.asia/admin/` — ожидается `200`
-или `302` с валидным сертификатом.
+или `302` с валидным сертификатом; `curl -I https://clinicnet.stom.asia/`
+— `200` (отдаёт `index.html` собранного фронтенда).
 
 ## 6. Первый пользователь (администратор сети)
 
@@ -164,6 +241,15 @@ sudo -u www-data venv/bin/python manage.py migrate_schemas --shared --noinput
 sudo -u www-data venv/bin/python manage.py migrate_schemas --schema=clinicnet
 sudo -u www-data venv/bin/python manage.py tenant_command seed_rbac --schema=clinicnet
 systemctl restart clinicnet
+
+# Фронтенд — пересобирается на КАЖДОМ обновлении, не только когда точно
+# знаешь, что менялся frontend/: gunicorn его не отдаёт вообще, старая
+# сборка в frontend-dist/ иначе тихо продолжит обслуживаться nginx.
+cd /var/www/clinicnet/frontend
+sudo -u www-data npm ci
+sudo -u www-data npm run build
+sudo -u www-data rm -rf /var/www/clinicnet/frontend-dist
+sudo -u www-data cp -r dist /var/www/clinicnet/frontend-dist
 
 # Если менялся triage_service/ (не при каждом обновлении):
 sudo -u www-data /var/www/clinicnet/triage_venv/bin/pip install -r triage_service/requirements.txt

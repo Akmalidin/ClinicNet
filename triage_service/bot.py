@@ -69,7 +69,7 @@ class TriageBot:
             return
 
         specialties = await self._specialties()
-        specialty_code = self.classifier.classify(text, specialties)
+        specialty_code, confidence = self.classifier.classify(text, specialties)
         if not specialty_code:
             names = ", ".join(s["name"] for s in specialties) or "уточните у администратора"
             await self.telegram.send_message(
@@ -96,6 +96,7 @@ class TriageBot:
             specialty_id=matched["id"],
             specialty_name=matched["name"],
             slot=slot,
+            match_confidence=confidence,
         )
         await self.telegram.send_message(
             chat_id,
@@ -132,6 +133,7 @@ class TriageBot:
             "suggested_doctor": slot["doctor"],
             "suggested_starts_at": slot["starts_at"],
             "suggested_ends_at": slot["ends_at"],
+            "match_confidence": session.get("match_confidence"),
         })
 
         await self.telegram.send_message(

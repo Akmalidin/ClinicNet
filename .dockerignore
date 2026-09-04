@@ -1,0 +1,26 @@
+# Applies to every `docker build` in this repo (django/triage/nginx
+# Dockerfiles all use the repo root as build context). Keeps secrets and
+# local cruft out of built image layers — .env files are supplied to
+# containers at runtime instead (docker-compose.yml's env_file: for
+# Django, a bind mount for triage_service/.env — see docs/DEPLOY-DOCKER.md
+# for why triage_service needs the actual file, not just env vars).
+.git/
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+.env
+*/.env
+**/.env
+node_modules/
+frontend/dist/
+staticfiles/
+media/
+*.log
+.DS_Store
+deploy/docker/certbot/conf/
+deploy/docker/certbot/www/

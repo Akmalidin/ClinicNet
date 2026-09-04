@@ -3,6 +3,8 @@ from datetime import time
 from django_tenants.test.cases import TenantTestCase
 from rest_framework.test import APIClient
 
+from django.utils import timezone
+
 from apps.branches.models import Branch, StaffBranchAssignment, Weekday
 
 from .models import BranchScope, Permission, Role, RolePermission, Specialty, User, UserRole
@@ -287,6 +289,255 @@ class MeReferralBranchesTests(TenantTestCase):
         )
 
 
+class MeTriageBranchesTests(TenantTestCase):
+    """MeView's triage_branches — same convention as referral_branches
+    above, this is what TriageQueueWidget.vue's client-side branch guard
+    verifies each row against (Фаза 5, под-модуль 2 frontend)."""
+
+    def setUp(self):
+        self.branch_a = Branch.objects.create(name="Филиал А", code="a")
+        self.branch_b = Branch.objects.create(name="Филиал Б", code="b")
+
+        view_perm = Permission.objects.create(code="triage.view", category="triage")
+        manage_perm = Permission.objects.create(code="triage.manage", category="triage")
+
+        plain_doctor_role = Role.objects.create(name="Врач", codename="doctor")
+        # No triage.view/manage — matches the real seed_rbac.
+
+        coordinator_role = Role.objects.create(name="Координатор филиала", codename="branch-admin")
+        RolePermission.objects.create(role=coordinator_role, permission=view_perm)
+        RolePermission.objects.create(role=coordinator_role, permission=manage_perm)
+
+        network_admin_role = Role.objects.create(name="Администратор сети", codename="network-admin")
+        RolePermission.objects.create(role=network_admin_role, permission=view_perm)
+
+        self.plain_doctor = User.objects.create(username="plain_doc2")
+        UserRole.objects.create(user=self.plain_doctor, role=plain_doctor_role, branch_scope=BranchScope.OWN_BRANCH)
+        StaffBranchAssignment.objects.create(
+            staff=self.plain_doctor, branch=self.branch_a, weekday=Weekday.MONDAY,
+            start_time=time(9, 0), end_time=time(17, 0),
+        )
+
+        self.coordinator = User.objects.create(username="coordinator2")
+        UserRole.objects.create(
+            user=self.coordinator, role=coordinator_role, branch_scope=BranchScope.OWN_BRANCH
+        )
+        StaffBranchAssignment.objects.create(
+            staff=self.coordinator, branch=self.branch_a, weekday=Weekday.MONDAY,
+            start_time=time(9, 0), end_time=time(17, 0),
+        )
+
+        self.network_admin = User.objects.create(username="net_admin2")
+        UserRole.objects.create(user=self.network_admin, role=network_admin_role, branch_scope=BranchScope.ALL)
+
+        self.tenant_host = self.domain.domain
+
+    def _me(self, user):
+        client = APIClient()
+        client.force_authenticate(user=user)
+        return client.get("/api/v1/me/", HTTP_HOST=self.tenant_host)
+
+    def test_plain_doctor_has_no_triage_branches(self):
+        response = self._me(self.plain_doctor)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["triage_branches"], [])
+
+    def test_coordinator_sees_only_their_own_branch(self):
+        response = self._me(self.coordinator)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["triage_branches"], [self.branch_a.pk])
+
+    def test_network_admin_sees_every_branch(self):
+        response = self._me(self.network_admin)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            set(response.json()["triage_branches"]), {self.branch_a.pk, self.branch_b.pk}
+        )
+
+
+class MeChurnBranchesTests(TenantTestCase):
+    """MeView's churn_branches — same convention as referral_branches/
+    triage_branches above (ChurnAlertsPage.vue's client-side branch guard)."""
+
+    def setUp(self):
+        self.branch_a = Branch.objects.create(name="Филиал А", code="a")
+        self.branch_b = Branch.objects.create(name="Филиал Б", code="b")
+
+        view_perm = Permission.objects.create(code="churn.view", category="churn")
+        manage_perm = Permission.objects.create(code="churn.manage", category="churn")
+
+        plain_doctor_role = Role.objects.create(name="Врач", codename="doctor")
+
+        coordinator_role = Role.objects.create(name="Координатор филиала", codename="branch-admin")
+        RolePermission.objects.create(role=coordinator_role, permission=view_perm)
+        RolePermission.objects.create(role=coordinator_role, permission=manage_perm)
+
+        network_admin_role = Role.objects.create(name="Администратор сети", codename="network-admin")
+        RolePermission.objects.create(role=network_admin_role, permission=view_perm)
+
+        self.plain_doctor = User.objects.create(username="plain_doc3")
+        UserRole.objects.create(user=self.plain_doctor, role=plain_doctor_role, branch_scope=BranchScope.OWN_BRANCH)
+        StaffBranchAssignment.objects.create(
+            staff=self.plain_doctor, branch=self.branch_a, weekday=Weekday.MONDAY,
+            start_time=time(9, 0), end_time=time(17, 0),
+        )
+
+        self.coordinator = User.objects.create(username="coordinator3")
+        UserRole.objects.create(
+            user=self.coordinator, role=coordinator_role, branch_scope=BranchScope.OWN_BRANCH
+        )
+        StaffBranchAssignment.objects.create(
+            staff=self.coordinator, branch=self.branch_a, weekday=Weekday.MONDAY,
+            start_time=time(9, 0), end_time=time(17, 0),
+        )
+
+        self.network_admin = User.objects.create(username="net_admin3")
+        UserRole.objects.create(user=self.network_admin, role=network_admin_role, branch_scope=BranchScope.ALL)
+
+        self.tenant_host = self.domain.domain
+
+    def _me(self, user):
+        client = APIClient()
+        client.force_authenticate(user=user)
+        return client.get("/api/v1/me/", HTTP_HOST=self.tenant_host)
+
+    def test_plain_doctor_has_no_churn_branches(self):
+        response = self._me(self.plain_doctor)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["churn_branches"], [])
+
+    def test_coordinator_sees_only_their_own_branch(self):
+        response = self._me(self.coordinator)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["churn_branches"], [self.branch_a.pk])
+
+    def test_network_admin_sees_every_branch(self):
+        response = self._me(self.network_admin)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            set(response.json()["churn_branches"]), {self.branch_a.pk, self.branch_b.pk}
+        )
+
+
+class MeInventoryBranchesTests(TenantTestCase):
+    """MeView's inventory_branches — same convention as churn_branches
+    above (WarehouseStockPage.vue's client-side branch guard)."""
+
+    def setUp(self):
+        self.branch_a = Branch.objects.create(name="Филиал А", code="a")
+        self.branch_b = Branch.objects.create(name="Филиал Б", code="b")
+
+        view_perm = Permission.objects.create(code="inventory.view", category="inventory")
+        manage_perm = Permission.objects.create(code="inventory.stock.manage", category="inventory")
+
+        coordinator_role = Role.objects.create(name="Координатор филиала", codename="branch-admin")
+        RolePermission.objects.create(role=coordinator_role, permission=view_perm)
+        RolePermission.objects.create(role=coordinator_role, permission=manage_perm)
+
+        self.coordinator = User.objects.create(username="coordinator4")
+        UserRole.objects.create(
+            user=self.coordinator, role=coordinator_role, branch_scope=BranchScope.OWN_BRANCH
+        )
+        StaffBranchAssignment.objects.create(
+            staff=self.coordinator, branch=self.branch_a, weekday=Weekday.MONDAY,
+            start_time=time(9, 0), end_time=time(17, 0),
+        )
+        self.tenant_host = self.domain.domain
+
+    def _me(self, user):
+        client = APIClient()
+        client.force_authenticate(user=user)
+        return client.get("/api/v1/me/", HTTP_HOST=self.tenant_host)
+
+    def test_coordinator_sees_only_their_own_branch(self):
+        response = self._me(self.coordinator)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["inventory_branches"], [self.branch_a.pk])
+
+
+class MeAdmissionDepartmentsTests(TenantTestCase):
+    """MeView's admission_departments — one level deeper than the
+    *_branches lists above (DEPARTMENT ids, not branches — see
+    apps.inpatient.rbac's docstring): AdmissionIntakePage.vue's entry
+    point and client-side guard."""
+
+    def setUp(self):
+        from apps.inpatient.models import Department, StaffDepartmentAssignment
+
+        self.branch_a = Branch.objects.create(name="Филиал А", code="a")
+        self.dept_therapy = Department.objects.create(branch=self.branch_a, name="Терапия", code="therapy")
+        self.dept_surgery = Department.objects.create(branch=self.branch_a, name="Хирургия", code="surgery")
+
+        manage_perm = Permission.objects.create(code="inpatient.admission.manage", category="inpatient")
+
+        doctor_role = Role.objects.create(name="Врач", codename="doctor")
+        RolePermission.objects.create(role=doctor_role, permission=manage_perm)
+
+        head_role = Role.objects.create(name="Заведующий отделением", codename="department-head")
+        RolePermission.objects.create(role=head_role, permission=manage_perm)
+
+        self.plain_doctor = User.objects.create(username="me_plain_doc")
+
+        # Doctor: ordinary own_branch grant — sees every department in
+        # the branch, same as everywhere else this project's doctors work.
+        self.doctor = User.objects.create(username="me_doctor")
+        UserRole.objects.create(user=self.doctor, role=doctor_role, branch_scope=BranchScope.OWN_BRANCH)
+        StaffBranchAssignment.objects.create(
+            staff=self.doctor, branch=self.branch_a, weekday=Weekday.MONDAY,
+            start_time=time(9, 0), end_time=time(17, 0),
+        )
+
+        # Department-head: SPECIFIC_BRANCHES with no branches attached —
+        # visibility comes only from StaffDepartmentAssignment (same
+        # provisioning convention as apps.inpatient.rbac's docstring).
+        self.head = User.objects.create(username="me_dept_head")
+        UserRole.objects.create(user=self.head, role=head_role, branch_scope=BranchScope.SPECIFIC_BRANCHES)
+        StaffDepartmentAssignment.objects.create(staff=self.head, department=self.dept_therapy)
+
+        self.tenant_host = self.domain.domain
+
+    def _me(self, user):
+        client = APIClient()
+        client.force_authenticate(user=user)
+        return client.get("/api/v1/me/", HTTP_HOST=self.tenant_host)
+
+    def test_plain_user_has_no_admission_departments(self):
+        response = self._me(self.plain_doctor)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["admission_departments"], [])
+
+    def test_doctor_sees_every_department_in_own_branch(self):
+        response = self._me(self.doctor)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            set(response.json()["admission_departments"]),
+            {self.dept_therapy.pk, self.dept_surgery.pk},
+        )
+
+    def test_department_head_sees_only_her_assigned_department(self):
+        response = self._me(self.head)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["admission_departments"], [self.dept_therapy.pk])
+
+    def test_bed_board_departments_includes_view_only_reach(self):
+        """Union of view+manage — a nurse (view only, no manage) still
+        reaches the bed board for her department, unlike admission_
+        departments which requires .manage."""
+        from apps.inpatient.models import StaffDepartmentAssignment
+
+        view_perm = Permission.objects.create(code="inpatient.admission.view", category="inpatient")
+        nurse_role = Role.objects.create(name="Постовая медсестра", codename="nurse")
+        RolePermission.objects.create(role=nurse_role, permission=view_perm)
+        nurse = User.objects.create(username="me_nurse")
+        UserRole.objects.create(user=nurse, role=nurse_role, branch_scope=BranchScope.SPECIFIC_BRANCHES)
+        StaffDepartmentAssignment.objects.create(staff=nurse, department=self.dept_therapy)
+
+        response = self._me(nurse)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["admission_departments"], [])  # no .manage
+        self.assertEqual(response.json()["bed_board_departments"], [self.dept_therapy.pk])
+
+
 class UsersWithPermissionTests(TenantTestCase):
     """Reverse lookup used by apps.referrals' escalate_stale_referrals:
     given a branch, who holds this permission there?"""
@@ -325,3 +576,87 @@ class UsersWithPermissionTests(TenantTestCase):
         user = User.objects.create(username="doctor")
         UserRole.objects.create(user=user, role=self.role, branch_scope=BranchScope.ALL)
         self.assertNotIn(user, users_with_permission(self.branch_a, "patient.manage"))
+
+
+class StaffDirectoryTests(TenantTestCase):
+    """StaffDirectoryView — Персонал сети frontend. Real KPIs computed
+    from Appointment, license status from User.license_expires_at, and
+    the ALL-scope-only gate (staff.view_network via HasNetworkWidePermission)."""
+
+    def setUp(self):
+        from datetime import date, timedelta
+
+        from apps.patients.models import Patient
+        from apps.scheduling.models import Appointment, AppointmentStatus
+
+        self.branch = Branch.objects.create(name="Филиал А", code="a")
+        view_perm = Permission.objects.create(code="staff.view_network", category="accounts")
+
+        network_admin_role = Role.objects.create(name="Администратор сети", codename="network-admin")
+        RolePermission.objects.create(role=network_admin_role, permission=view_perm)
+        branch_admin_role = Role.objects.create(name="Администратор филиала", codename="branch-admin")
+        # Deliberately NOT granted staff.view_network — own_branch scope
+        # can't satisfy an ALL-scope-only check regardless.
+        doctor_role = Role.objects.create(name="Врач", codename="doctor")
+        bot_role = Role.objects.create(name="AI-триаж бот", codename="triage-bot")
+
+        self.network_admin = User.objects.create(username="net_admin_staff")
+        UserRole.objects.create(user=self.network_admin, role=network_admin_role, branch_scope=BranchScope.ALL)
+
+        self.branch_admin = User.objects.create(username="branch_admin_staff")
+        UserRole.objects.create(user=self.branch_admin, role=branch_admin_role, branch_scope=BranchScope.OWN_BRANCH)
+
+        today = date.today()
+        self.doctor = User.objects.create(
+            username="doc_kpi", first_name="Тен", last_name="Богдан",
+            license_expires_at=today + timedelta(days=10),
+        )
+        UserRole.objects.create(user=self.doctor, role=doctor_role, branch_scope=BranchScope.OWN_BRANCH)
+        StaffBranchAssignment.objects.create(
+            staff=self.doctor, branch=self.branch, weekday=Weekday.MONDAY,
+            start_time=time(9, 0), end_time=time(17, 0),
+        )
+
+        self.bot = User.objects.create(username="triage_bot_svc")
+        UserRole.objects.create(user=self.bot, role=bot_role, branch_scope=BranchScope.ALL)
+
+        patient = Patient.objects.create(first_name="Т", last_name="П")
+        now = timezone.now()
+        Appointment.objects.create(
+            branch=self.branch, patient=patient, doctor=self.doctor,
+            starts_at=now - timedelta(days=1), ends_at=now - timedelta(days=1) + timedelta(minutes=30),
+            status=AppointmentStatus.COMPLETED,
+        )
+        Appointment.objects.create(
+            branch=self.branch, patient=patient, doctor=self.doctor,
+            starts_at=now - timedelta(days=2), ends_at=now - timedelta(days=2) + timedelta(minutes=30),
+            status=AppointmentStatus.NO_SHOW,
+        )
+        Appointment.objects.create(
+            branch=self.branch, patient=patient, doctor=self.doctor,
+            starts_at=now + timedelta(days=1), ends_at=now + timedelta(days=1) + timedelta(minutes=30),
+            status=AppointmentStatus.SCHEDULED,
+        )
+        self.host = self.domain.domain
+
+    def _client(self, user):
+        client = APIClient()
+        client.force_authenticate(user=user)
+        return client
+
+    def test_branch_admin_cannot_access(self):
+        response = self._client(self.branch_admin).get("/api/v1/staff/", HTTP_HOST=self.host)
+        self.assertEqual(response.status_code, 403)
+
+    def test_network_admin_sees_kpis_and_excludes_bot(self):
+        response = self._client(self.network_admin).get("/api/v1/staff/", HTTP_HOST=self.host)
+        self.assertEqual(response.status_code, 200, response.data)
+        by_username = {row["name"]: row for row in response.data}
+        self.assertIn("Тен Богдан", by_username)
+        self.assertNotIn("triage_bot_svc", [row["name"] for row in response.data])
+
+        doctor_row = by_username["Тен Богдан"]
+        self.assertEqual(doctor_row["appointments_last_7_days"], 2)  # completed + no_show, not the future one
+        self.assertEqual(doctor_row["conversion_rate"], 50.0)  # 1 completed / 2 terminal
+        self.assertEqual(doctor_row["license_status"], "warning")  # expires in 10 days
+        self.assertEqual(doctor_row["branches"], [self.branch.name])

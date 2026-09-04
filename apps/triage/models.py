@@ -1,4 +1,5 @@
 from django.core.exceptions import ValidationError
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.utils import timezone
 
@@ -63,6 +64,19 @@ class TriageSuggestion(models.Model):
     )
     suggested_starts_at = models.DateTimeField()
     suggested_ends_at = models.DateTimeField()
+    # 0-100, самооценка классификатора (triage_service/classifier.py) —
+    # для эвристики KeywordSpecialtyClassifier это условная эвристика по
+    # числу совпавших ключевых слов, не заявка на клиническую точность
+    # (тот же принцип упрощения, что у ChurnRisk.risk_score); для
+    # AnthropicSpecialtyClassifier — то, что вернула сама модель. null у
+    # предложений, созданных до этого поля. Только для того, чтобы
+    # координатор видел, насколько бот уверен, и мог решить, стоит ли
+    # перепроверить/сменить слот, а не автоматически что-то менять.
+    match_confidence = models.PositiveSmallIntegerField(
+        null=True, blank=True,
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+        verbose_name="Уверенность классификатора (%)",
+    )
 
     status = models.CharField(
         max_length=20, choices=TriageSuggestionStatus.choices, default=TriageSuggestionStatus.PENDING
@@ -105,7 +119,7 @@ class TriageSuggestion(models.Model):
                     % TriageSuggestionStatus(original_status).label
                 )
 
-    def confirm(self, confirmed_by, patient) -> bool:
+    def confirm(self, confirmed_by, patient, doctor=None, starts_at=None, ends_at=None) -> bool:
         """Создаёт реальный scheduling.Appointment и закрывает
         предложение. `patient` передаётся координатором явно (не
         auto-matching по телефону из чата) — телефон, который человек
@@ -115,28 +129,45 @@ class TriageSuggestion(models.Model):
         либо сперва заводит нового через уже существующий
         patient.manage-флоу, а потом подтверждает предложение с его id.
 
+        doctor/starts_at/ends_at — «Изменить слот»: координатор может
+        подтвердить на ДРУГОГО врача/время (тот же филиал), не только на
+        то, что предложил бот — например, если предложенный бота слот
+        уже неудобен пациенту, или уверенность классификатора низкая и
+        координатор сам подобрал более подходящего врача. Оставлены
+        необязательными — без них поведение не меняется.
+
         No-op-safe: возвращает False, если предложение уже закрыто, ИЛИ
-        если предложенный слот уже в прошлом (сам переводит его в
-        EXPIRED вместо того, чтобы создать приём на прошедшее время).
-        Appointment.clean()'s собственная проверка пересечений подтвердит
-        (или отклонит), что слот с момента предложения не был занят
-        кем-то другим — та же защита, что уже есть у Appointment.
+        если итоговый слот (с учётом возможной замены) уже в прошлом —
+        для оригинального слота бота это переводит предложение в EXPIRED
+        (как раньше), для явно переданной координатором замены — просто
+        отказ, без побочных эффектов (координатор сам ошибся в форме, не
+        бот устарел). Appointment.clean()'s собственная проверка
+        пересечений подтвердит (или отклонит), что слот с момента
+        предложения не был занят кем-то другим — та же защита, что уже
+        есть у Appointment.
         """
         from apps.scheduling.models import Appointment
 
         if self.status in TERMINAL_STATUSES:
             return False
-        if self.suggested_starts_at <= timezone.now():
-            self.status = TriageSuggestionStatus.EXPIRED
-            self.save(update_fields=["status", "updated_at"])
+
+        is_override = doctor is not None or starts_at is not None or ends_at is not None
+        use_doctor = doctor or self.suggested_doctor
+        use_starts = starts_at or self.suggested_starts_at
+        use_ends = ends_at or self.suggested_ends_at
+
+        if use_starts <= timezone.now():
+            if not is_override:
+                self.status = TriageSuggestionStatus.EXPIRED
+                self.save(update_fields=["status", "updated_at"])
             return False
 
         appointment = Appointment(
             branch=self.branch,
             patient=patient,
-            doctor=self.suggested_doctor,
-            starts_at=self.suggested_starts_at,
-            ends_at=self.suggested_ends_at,
+            doctor=use_doctor,
+            starts_at=use_starts,
+            ends_at=use_ends,
             notes=f"Создано через AI-триаж (Telegram). Жалоба: {self.symptom_text}",
         )
         appointment.full_clean()

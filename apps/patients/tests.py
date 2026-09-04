@@ -50,3 +50,27 @@ class PatientCardIsNetworkWideTests(TenantTestCase):
             f"/api/v1/patients/{self.patient_b.pk}/", HTTP_HOST=self.host
         )
         self.assertEqual(response.status_code, 200)
+
+    def test_search_by_name_and_phone(self):
+        """search_fields existed on the ViewSet before this without a
+        SearchFilter to read it — verifying ?search= actually filters now
+        (found while building the triage-suggestion confirm patient-picker,
+        see apps.patients.views.PatientViewSet)."""
+        self.patient_a.phone = "+79990001122"
+        self.patient_a.save(update_fields=["phone"])
+
+        by_name = self.client_api.get(
+            "/api/v1/patients/?search=Пациентов", HTTP_HOST=self.host
+        )
+        self.assertEqual({row["id"] for row in by_name.json()}, {self.patient_a.pk, self.patient_b.pk})
+
+        by_last_name_a = self.client_api.get(
+            "/api/v1/patients/?search=А", HTTP_HOST=self.host
+        )
+        ids = {row["id"] for row in by_last_name_a.json()}
+        self.assertIn(self.patient_a.pk, ids)
+
+        by_phone = self.client_api.get(
+            "/api/v1/patients/?search=9990001122", HTTP_HOST=self.host
+        )
+        self.assertEqual({row["id"] for row in by_phone.json()}, {self.patient_a.pk})

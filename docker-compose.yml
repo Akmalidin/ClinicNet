@@ -1,0 +1,85 @@
+# Продовый стек для нового выделенного сервера — см. docs/DEPLOY-DOCKER.md.
+# Не используется в разработке (см. README.md — там просто `python
+# manage.py runserver` + `npm run dev` напрямую, без Docker).
+#
+# Секреты (.env, triage_service/.env) НЕ коммитятся — см. .env.docker.example
+# и .env.example для того, что в них должно быть.
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    # Порт наружу (в docker-сеть хоста) не публикуется — только сервисы
+    # этого compose-стека обращаются к БД по имени `db`.
+
+  web:
+    build:
+      context: .
+      dockerfile: deploy/docker/django.Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - static_volume:/app/staticfiles
+    # Порт 8041 не публикуется на хост — только nginx достаёт web:8041
+    # изнутри compose-сети (см. deploy/docker/nginx.conf).
+
+  triage:
+    build:
+      context: .
+      dockerfile: deploy/docker/triage.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - web
+    volumes:
+      # config.py читает СВОЙ .env явно с диска (RepositoryEnv), а не из
+      # окружения процесса — поэтому файл монтируется, а не передаётся
+      # через env_file/environment (в отличие от Django-сервиса выше).
+      # Секрет не попадает в образ (.dockerignore исключает **/.env из
+      # контекста сборки).
+      - ./triage_service/.env:/app/triage_service/.env:ro
+
+  nginx:
+    build:
+      context: .
+      dockerfile: deploy/docker/nginx.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - web
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - static_volume:/app/staticfiles:ro
+      - ./deploy/docker/certbot/conf:/etc/letsencrypt:ro
+      - ./deploy/docker/certbot/www:/var/www/certbot:ro
+
+  # Не демон — используется точечно: один раз через
+  # deploy/docker/certbot/init-letsencrypt.sh (выпуск сертификата), затем
+  # по расписанию (`docker compose run --rm certbot renew` из cron/systemd
+  # timer хоста — см. docs/DEPLOY-DOCKER.md) для продления.
+  certbot:
+    image: certbot/certbot
+    volumes:
+      - ./deploy/docker/certbot/conf:/etc/letsencrypt
+      - ./deploy/docker/certbot/www:/var/www/certbot
+
+volumes:
+  pgdata:
+  # Django's collectstatic output (STATIC_ROOT) — заполняется entrypoint'ом
+  # web-контейнера при каждом старте, читается nginx-контейнером как
+  # read-only. НЕ содержит секретов — можно спокойно жить как named volume.
+  static_volume:

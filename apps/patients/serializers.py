@@ -15,6 +15,11 @@ class PatientSerializer(serializers.ModelSerializer):
             "date_of_birth",
             "primary_branch",
             "notes",
+            "loyalty_points",
             "created_at",
         )
-        read_only_fields = ("id", "created_at")
+        # loyalty_points — списывается только InvoiceViewSet.pay() (метод
+        # bonus), правится вручную через admin; нет API-пути начислить их
+        # через обычный PATCH /patients/, тот же принцип "один
+        # контролируемый путь записи", что у InsurancePolicy.used_amount.
+        read_only_fields = ("id", "loyalty_points", "created_at")

@@ -41,7 +41,7 @@ class ReferralViewSet(viewsets.ModelViewSet):
         "decline": "referrals.manage",
         "complete": "referrals.manage",
     }
-    filterset_fields = ["status", "priority", "to_doctor", "from_doctor"]
+    filterset_fields = ["status", "priority", "to_doctor", "from_doctor", "patient"]
 
     def get_queryset(self):
         user = self.request.user

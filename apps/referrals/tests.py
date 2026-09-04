@@ -165,6 +165,27 @@ class ReferralAPITests(TenantTestCase):
         notification = Notification.objects.get(referral_id=response.data["id"])
         self.assertEqual(notification.recipient_id, self.to_doctor.pk)
 
+    def test_filter_by_patient(self):
+        """Added for PatientCardPage.vue's unified timeline — the card
+        needs this patient's referral history specifically, not filtered
+        by from_doctor/to_doctor (an "own" bypass row for someone else's
+        patient would otherwise leak in)."""
+        other_patient = Patient.objects.create(first_name="Другой", last_name="Пациентов")
+        client = self._client_for(self.from_doctor)
+        for target_patient in (self.patient, other_patient):
+            client.post(
+                "/api/v1/referrals/",
+                {
+                    "patient": target_patient.pk, "to_doctor": self.to_doctor.pk,
+                    "from_branch": self.branch_a.pk, "to_branch": self.branch_b.pk,
+                    "reason": "Тест",
+                },
+                HTTP_HOST=self.host,
+            )
+        response = client.get(f"/api/v1/referrals/?patient={self.patient.pk}", HTTP_HOST=self.host)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual({row["patient"] for row in response.json()}, {self.patient.pk})
+
     def test_diagnosis_snapshot_is_copied_from_source_visit_not_client(self):
         """"Снапшот, не живая ссылка" (Referral docstring) has to come from
         the server's read of source_visit at creation time — never from

@@ -23,6 +23,88 @@ const routes = [
     component: () => import('../pages/SchedulePage.vue'),
     meta: { requiresAuth: true },
   },
+  {
+    path: '/operations/:id',
+    name: 'operation-checklist',
+    component: () => import('../pages/OperationChecklistPage.vue'),
+    props: true,
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/roles',
+    name: 'rbac-admin',
+    component: () => import('../pages/RbacAdminPage.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/churn',
+    name: 'churn-alerts',
+    component: () => import('../pages/ChurnAlertsPage.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/stock',
+    name: 'warehouse-stock',
+    component: () => import('../pages/WarehouseStockPage.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/invoices/:id',
+    name: 'billing-invoice',
+    component: () => import('../pages/BillingInvoicePage.vue'),
+    props: true,
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/staff',
+    name: 'staff-hr',
+    component: () => import('../pages/StaffHrPage.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/triage',
+    name: 'triage-queue',
+    component: () => import('../pages/TriageQueuePage.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/patients/:id/admit',
+    name: 'admission-intake',
+    component: () => import('../pages/AdmissionIntakePage.vue'),
+    props: true,
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/beds',
+    name: 'bed-management',
+    component: () => import('../pages/BedManagementPage.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/admissions/:id/vitals',
+    name: 'vitals-chart',
+    component: () => import('../pages/VitalsChartPage.vue'),
+    props: true,
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/network-schedule',
+    name: 'network-schedule',
+    component: () => import('../pages/MultiBranchSchedulePage.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/network-dashboard',
+    name: 'network-dashboard',
+    component: () => import('../pages/NetworkDashboardPage.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/network-analytics',
+    name: 'network-analytics',
+    component: () => import('../pages/NetworkAnalyticsPage.vue'),
+    meta: { requiresAuth: true },
+  },
 ]
 
 const router = createRouter({

@@ -48,6 +48,7 @@ PERMISSIONS = [
     ("triage.view", "triage", "Просмотр очереди предложений AI-триажа своего филиала"),
     ("triage.manage", "triage", "Подтверждение/отклонение предложения AI-триажа"),
     ("triage.ingest", "triage", "Создание предложения AI-триажа (только сервисный аккаунт бота)"),
+    ("staff.view_network", "accounts", "Просмотр сводного списка персонала сети (KPI, лицензии)"),
 ]
 
 # codename -> (name, is_system, branch-agnostic description, permission codes)

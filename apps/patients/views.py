@@ -1,4 +1,5 @@
-from rest_framework import viewsets
+from django_filters.rest_framework import DjangoFilterBackend
+from rest_framework import filters, viewsets
 
 from apps.accounts.permissions import HasPermission
 
@@ -32,6 +33,15 @@ class PatientViewSet(viewsets.ModelViewSet):
         "DELETE": "patient.manage",
     }
     filterset_fields = ["primary_branch"]
+    # search_fields existed before this comment did nothing on its own —
+    # DjangoFilterBackend (the project's DEFAULT_FILTER_BACKENDS) only
+    # does exact-field filtering, not free-text `?search=`; SearchFilter
+    # has to be added explicitly per-viewset to actually read it. Found
+    # while building the triage-suggestion confirm UI (frontend needs to
+    # look up an existing patient by name/phone), not a pre-existing
+    # report — there was no caller depending on the old (silently
+    # inert) behaviour.
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     search_fields = ["first_name", "last_name", "phone"]
 
     def get_queryset(self):

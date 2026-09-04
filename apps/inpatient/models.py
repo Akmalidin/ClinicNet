@@ -1,4 +1,5 @@
 from django.core.exceptions import ValidationError
+from django.core.validators import MaxValueValidator
 from django.db import models
 from django.utils import timezone
 
@@ -138,6 +139,18 @@ class AdmissionStatus(models.TextChoices):
     DISCHARGED = "discharged", "Выписан"
 
 
+class AdmissionReason(models.TextChoices):
+    """Найдено при разведке admissionintake.html — "Основание" госпи-
+    тализации нигде не хранилось (только диагноз). Чисто описательная
+    категоризация, ни на что не влияющая структурно (в отличие от
+    статуса) — как AppointmentReason'а тут нет, справочника заводить не
+    нужно, три варианта фиксированы прямо в макете."""
+
+    PLANNED = "planned", "Плановая операция"
+    EMERGENCY = "emergency", "Экстренная госпитализация"
+    TRANSFER = "transfer", "Перевод из другого отделения"
+
+
 # Один терминальный статус, не три, как в черновике промпта (active/
 # transferred/discharged) — "переведён" не тupik, госпитализация после
 # перевода остаётся активной, просто в другом отделении/на другой
@@ -170,6 +183,14 @@ class Admission(models.Model):
         "accounts.User", on_delete=models.PROTECT, related_name="admissions_placed"
     )
     diagnosis_at_admission = models.TextField(verbose_name="Диагноз при поступлении")
+    reason = models.CharField(
+        max_length=20, choices=AdmissionReason.choices, default=AdmissionReason.PLANNED,
+        verbose_name="Основание госпитализации",
+    )
+    notes = models.TextField(
+        blank=True, verbose_name="Заметки при поступлении",
+        help_text="Аллергии, план на ближайшую операцию и т.п. — отдельно от клинического диагноза.",
+    )
     status = models.CharField(
         max_length=20, choices=AdmissionStatus.choices, default=AdmissionStatus.ACTIVE
     )
@@ -423,6 +444,14 @@ class VitalsRecord(models.Model):
     temperature = models.DecimalField(
         max_digits=4, decimal_places=1, null=True, blank=True, verbose_name="Температура"
     )
+    # Найдено при разведке vitalschart.html — сатурация (SpO₂) в макете
+    # есть отдельной колонкой, в модели её не было вообще (только АД/
+    # пульс/температура). Проценты, как и остальные показатели —
+    # необязательное поле, но валидируем диапазон 0-100 (clean() ниже),
+    # это не просто число, а физический процент.
+    spo2 = models.PositiveSmallIntegerField(
+        null=True, blank=True, validators=[MaxValueValidator(100)], verbose_name="Сатурация (SpO₂), %"
+    )
     note = models.CharField(max_length=255, blank=True)
     recorded_at = models.DateTimeField(auto_now_add=True)
 
@@ -443,6 +472,7 @@ class VitalsRecord(models.Model):
             self.blood_pressure_diastolic is not None,
             self.pulse is not None,
             self.temperature is not None,
+            self.spo2 is not None,
         ]):
             raise ValidationError("Нужно указать хотя бы один показатель.")
         if self.admission_id and self.admission.status != AdmissionStatus.ACTIVE:

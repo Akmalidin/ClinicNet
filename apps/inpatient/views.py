@@ -13,6 +13,7 @@ from apps.patients.models import Patient
 
 from .models import (
     Admission,
+    AdmissionReason,
     AdmissionStatus,
     Bed,
     BedStatus,
@@ -217,11 +218,119 @@ class AdmissionViewSet(viewsets.ModelViewSet):
                 attending_doctor=attending_doctor,
                 admitted_by=request.user,
                 diagnosis_at_admission=data.get("diagnosis_at_admission", ""),
+                reason=data.get("reason") or AdmissionReason.PLANNED,
+                notes=data.get("notes", ""),
             )
         except DjangoValidationError as exc:
             raise drf_serializers.ValidationError(_validation_detail(exc))
 
         return Response(self.get_serializer(admission).data, status=201)
+
+    @action(detail=False, methods=["get"], required_permission="inpatient.admission.manage")
+    def intake_options(self, request):
+        """Отделения → палаты → койки (со статусом каждой), доступные
+        текущему пользователю для госпитализации — то, чего не хватало
+        для «Приёма в стационар» из макета admissionintake.html.
+        Специально НЕ переиспользует DepartmentViewSet/RoomViewSet/
+        BedViewSet: те branch-scoped (HasBranchPermission через
+        inpatient.department.view), а зав.отделением/медсестра
+        видят СВОИ отделения только через StaffDepartmentAssignment
+        (department-scoped, apps.inpatient.rbac) — через branch-scoped
+        вьюсеты они не найдут даже собственную палату, если у их роли
+        нет отдельного branch-уровневого гранта на inpatient.department.
+        view (см. seed_rbac.py: "department-head"/"nurse" — SPECIFIC_
+        BRANCHES без филиалов). Список кроватей — не только свободные:
+        координатору нужно видеть и почему конкретная недоступна
+        (занята/уборка/резерв), не только пустой список без объяснения.
+        """
+        departments = departments_for_permission(
+            request.user, "inpatient.admission.manage"
+        ).select_related("branch")
+        rooms = Room.objects.filter(department__in=departments, is_active=True).select_related("department")
+        beds = Bed.objects.filter(room__in=rooms).order_by("label")
+
+        beds_by_room = {}
+        for bed in beds:
+            beds_by_room.setdefault(bed.room_id, []).append(
+                {"id": bed.pk, "label": bed.label, "status": bed.status}
+            )
+        rooms_by_department = {}
+        for room in rooms:
+            rooms_by_department.setdefault(room.department_id, []).append(
+                {"id": room.pk, "name": room.name, "beds": beds_by_room.get(room.pk, [])}
+            )
+
+        data = [
+            {
+                "id": department.pk,
+                "name": department.name,
+                "branch": department.branch_id,
+                "branch_name": department.branch.name,
+                "rooms": rooms_by_department.get(department.pk, []),
+            }
+            for department in departments
+        ]
+        return Response(data)
+
+    @action(detail=False, methods=["get"], required_permission="inpatient.admission.view")
+    def bed_board(self, request):
+        """Коечный фонд (bedmanagement.html) — та же department-scoped
+        разведка/структура, что intake_options, но на .view (шире круг:
+        координатор/врач/медсестра, которым нужно просто видеть
+        занятость, не обязательно госпитализировать). Занятая койка
+        несёт настоящего пациента текущей активной госпитализации — в
+        макете там ФИО, для резерва — время/повод («Плановая, 14:00»);
+        последнего в модели нет вообще (Bed.status=RESERVED — просто
+        ручная пометка персонала без данных о том, для кого/когда, см.
+        Bed's докстринг), поэтому честно не показываем то, чего нет,
+        вместо выдумывания.
+        """
+        departments = departments_for_permission(
+            request.user, "inpatient.admission.view"
+        ).select_related("branch")
+        rooms = Room.objects.filter(department__in=departments, is_active=True).select_related("department")
+        beds = Bed.objects.filter(room__in=rooms).order_by("label")
+
+        active_admission_by_bed = {
+            admission.bed_id: admission
+            for admission in Admission.objects.filter(
+                bed__in=beds, status=AdmissionStatus.ACTIVE
+            ).select_related("patient")
+        }
+
+        beds_by_room = {}
+        occupancy = {choice: 0 for choice in BedStatus.values}
+        for bed in beds:
+            occupancy[bed.status] += 1
+            active_admission = active_admission_by_bed.get(bed.pk)
+            beds_by_room.setdefault(bed.room_id, []).append({
+                "id": bed.pk, "label": bed.label, "status": bed.status,
+                "patient_name": str(active_admission.patient) if active_admission else None,
+                # Клика на занятую койку достаточно, чтобы уйти в лист
+                # наблюдения (vitalschart.html) — id нужен, не только имя.
+                "admission_id": active_admission.pk if active_admission else None,
+            })
+        rooms_by_department = {}
+        for room in rooms:
+            rooms_by_department.setdefault(room.department_id, []).append(
+                {"id": room.pk, "name": room.name, "beds": beds_by_room.get(room.pk, [])}
+            )
+
+        data = {
+            "occupancy": occupancy,
+            "total_beds": len(beds),
+            "departments": [
+                {
+                    "id": department.pk,
+                    "name": department.name,
+                    "branch": department.branch_id,
+                    "branch_name": department.branch.name,
+                    "rooms": rooms_by_department.get(department.pk, []),
+                }
+                for department in departments
+            ],
+        }
+        return Response(data)
 
     @action(detail=True, methods=["post"])
     def discharge(self, request, pk=None):

@@ -16,6 +16,27 @@ export const useAuthStore = defineStore('auth', {
     // independent fetch, never a trust of whatever the referrals list
     // endpoint already returned.
     referralBranches: [],
+    // triage_branches: [id, ...] — same convention as referralBranches,
+    // computed server-side by rbac.branches_for_permission() over
+    // triage.view/triage.manage (see MeView). TriageQueueWidget.vue's
+    // client-side branch guard re-checks each row against this, and
+    // DashboardPage.vue uses it to decide whether to render the widget
+    // at all — a user without triage.view shouldn't even fetch the
+    // triage-suggestions endpoint (it'd just 403).
+    triageBranches: [],
+    // churn_branches: [id, ...] — same convention (ChurnAlertsPage.vue).
+    churnBranches: [],
+    // inventory_branches: [id, ...] — same convention (WarehouseStockPage.vue).
+    inventoryBranches: [],
+    // admission_departments: [id, ...] — one level deeper than the
+    // *_branches lists above: DEPARTMENT ids, not branches (see
+    // apps.inpatient.rbac's docstring). AdmissionIntakePage.vue's entry
+    // point and client-side guard.
+    admissionDepartments: [],
+    // bed_board_departments: [id, ...] — same idea, union of view+manage
+    // (broader than admissionDepartments, which needs .manage) —
+    // BedManagementPage.vue's entry point and client-side guard.
+    bedBoardDepartments: [],
     ready: false,
   }),
   getters: {
@@ -32,12 +53,22 @@ export const useAuthStore = defineStore('auth', {
       this.user = null
       this.roles = []
       this.referralBranches = []
+      this.triageBranches = []
+      this.churnBranches = []
+      this.inventoryBranches = []
+      this.admissionDepartments = []
+      this.bedBoardDepartments = []
     },
     async fetchMe() {
       const { data } = await meApi.get()
       this.user = data
       this.roles = data.roles ?? []
       this.referralBranches = data.referral_branches ?? []
+      this.triageBranches = data.triage_branches ?? []
+      this.churnBranches = data.churn_branches ?? []
+      this.inventoryBranches = data.inventory_branches ?? []
+      this.admissionDepartments = data.admission_departments ?? []
+      this.bedBoardDepartments = data.bed_board_departments ?? []
     },
     // Called once on app boot: a stored access token doesn't mean it's
     // still valid, so this round-trips through /me/ (the request
