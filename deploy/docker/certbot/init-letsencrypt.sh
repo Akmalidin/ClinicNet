@@ -43,9 +43,10 @@ ssl_ciphers "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECD
 CONF
 
 echo "### Генерирую ssl-dhparams.pem (2048 бит, локально, без внешних зависимостей) ..."
-if [ ! -f "$DATA_PATH/conf/ssl-dhparams.pem" ]; then
-  docker compose run --rm --entrypoint "openssl dhparam -out /etc/letsencrypt/ssl-dhparams.pem 2048" certbot
-fi
+# Без проверки "уже существует": скрипт может перезапускаться после
+# сбоя (как только что — старая версия оставляла тут битый файл с
+# "404: Not Found"), так что каждый повторный запуск просто пишет заново.
+docker compose run --rm --entrypoint "openssl dhparam -out /etc/letsencrypt/ssl-dhparams.pem 2048" certbot
 
 echo "### Создаю временный self-signed сертификат, чтобы nginx вообще смог стартовать ..."
 CERT_PATH="/etc/letsencrypt/live/$DOMAIN"
@@ -60,10 +61,11 @@ echo "### Стартую nginx с временным сертификатом ..
 docker compose up -d nginx
 
 echo "### Удаляю временный сертификат ..."
-docker compose run --rm --entrypoint "\
-  rm -rf /etc/letsencrypt/live/$DOMAIN && \
-  rm -rf /etc/letsencrypt/archive/$DOMAIN && \
-  rm -rf /etc/letsencrypt/renewal/$DOMAIN.conf" certbot
+# Один `rm -rf` с тремя путями, не три через `&&` — --entrypoint не идёт
+# через шелл (docker compose разбивает строку на argv напрямую), так что
+# `&&` здесь был бы просто лишним буквальным аргументом для rm, а не
+# оператором шелла.
+docker compose run --rm --entrypoint "rm -rf /etc/letsencrypt/live/$DOMAIN /etc/letsencrypt/archive/$DOMAIN /etc/letsencrypt/renewal/$DOMAIN.conf" certbot
 
 echo "### Запрашиваю настоящий сертификат у Let's Encrypt ..."
 docker compose run --rm --entrypoint "\
