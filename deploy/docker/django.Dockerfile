@@ -28,7 +28,16 @@ RUN chmod +x /entrypoint.sh
 # Runs as a non-root user, same principle as www-data on the old
 # systemd-based deploy — no reason a compromised gunicorn worker needs
 # root inside its own container.
-RUN useradd --create-home --uid 1000 app
+#
+# /app/staticfiles is chown'ed HERE, before USER switches away from root
+# and before docker-compose.yml ever mounts static_volume over it: Docker
+# initializes a brand-new named volume by copying whatever already exists
+# at its mount point in the image (content + ownership) — skip this and
+# the volume comes up root-owned, and collectstatic (running as `app`)
+# fails with PermissionError on every container start.
+RUN useradd --create-home --uid 1000 app \
+    && mkdir -p /app/staticfiles \
+    && chown -R app:app /app
 USER app
 
 EXPOSE 8041
