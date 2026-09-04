@@ -1,4 +1,9 @@
-# Деплой ClinicNet — `clinicnet.stom.asia`
+# Деплой ClinicNet — `clinicnet.stom.asia` (АРХИВ — старый сервер)
+
+> **Устарело.** Проект переехал на новый, выделенный только под
+> ClinicNet сервер, деплой там — через Docker, см. `docs/DEPLOY-DOCKER.md`.
+> Этот файл оставлен как есть — история и справка по общему хосту
+> `46.149.68.65`, если он ещё где-то используется.
 
 Сервер `46.149.68.65` — **общий продовый хост**, на нём уже живут SADAF
 (`sadaf.service`, `/var/www/sadaf`), AutoParts ERP (`erp_gunicorn.service`) и
