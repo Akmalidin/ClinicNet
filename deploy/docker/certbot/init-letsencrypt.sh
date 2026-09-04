@@ -24,10 +24,28 @@ else
   EMAIL_ARG="--email $EMAIL"
 fi
 
-echo "### Скачиваю рекомендованные TLS-параметры Let's Encrypt (options-ssl-nginx.conf, ssl-dhparams.pem) ..."
+echo "### Пишу рекомендованные TLS-параметры Let's Encrypt (options-ssl-nginx.conf) ..."
+# Зашито прямо в скрипт, а не скачано с GitHub: пути certbot-репозитория,
+# откуда раньше качался этот файл, перестали существовать (curl молча
+# получал "404: Not Found" и клал этот текст в конфиг — nginx с ним не
+# стартовал). Содержимое ниже — стандартный certbot-nginx intermediate-
+# профиль (TLS 1.2/1.3), одинаковый у всех, кто ставил certbot руками.
 mkdir -p "$DATA_PATH/conf"
-curl -s https://raw.githubusercontent.com/certbot/certbot/master/certbot-nginx/certbot_nginx/_internal/tls_configs/options-ssl-nginx.conf > "$DATA_PATH/conf/options-ssl-nginx.conf"
-curl -s https://raw.githubusercontent.com/certbot/certbot/master/certbot/certbot/ssl-dhparams.pem > "$DATA_PATH/conf/ssl-dhparams.pem"
+cat > "$DATA_PATH/conf/options-ssl-nginx.conf" <<'CONF'
+ssl_session_cache shared:le_nginx_SSL:10m;
+ssl_session_timeout 1440m;
+ssl_session_tickets off;
+
+ssl_protocols TLSv1.2 TLSv1.3;
+ssl_prefer_server_ciphers off;
+
+ssl_ciphers "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384";
+CONF
+
+echo "### Генерирую ssl-dhparams.pem (2048 бит, локально, без внешних зависимостей) ..."
+if [ ! -f "$DATA_PATH/conf/ssl-dhparams.pem" ]; then
+  docker compose run --rm --entrypoint "openssl dhparam -out /etc/letsencrypt/ssl-dhparams.pem 2048" certbot
+fi
 
 echo "### Создаю временный self-signed сертификат, чтобы nginx вообще смог стартовать ..."
 CERT_PATH="/etc/letsencrypt/live/$DOMAIN"
